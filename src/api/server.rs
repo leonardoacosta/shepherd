@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -31,6 +31,17 @@ pub(super) const APP_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 const INITIAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_INITIAL_REQUEST_BYTES: usize = 1024 * 1024;
+const MAX_API_CONNECTIONS: usize = 128;
+
+struct ConnectionSlot<'a> {
+    active: &'a AtomicUsize,
+}
+
+impl Drop for ConnectionSlot<'_> {
+    fn drop(&mut self) {
+        self.active.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 pub struct ServerHandle {
     _thread: std::thread::JoinHandle<()>,
@@ -86,6 +97,7 @@ pub fn start_server_with_capabilities(
 
     let running = Arc::new(AtomicBool::new(true));
     let listener_running = Arc::clone(&running);
+    let active_connections = Arc::new(AtomicUsize::new(0));
     let thread = std::thread::spawn(move || {
         for stream in listener.incoming() {
             match stream {
@@ -94,7 +106,22 @@ pub fn start_server_with_capabilities(
                     let event_hub = event_hub.clone();
                     let capabilities = capabilities.clone();
                     let connection_running = Arc::clone(&listener_running);
+                    let active_connections = Arc::clone(&active_connections);
                     std::thread::spawn(move || {
+                        let slot = match try_acquire_connection_slot(
+                            &active_connections,
+                            MAX_API_CONNECTIONS,
+                        ) {
+                            Some(slot) => slot,
+                            None => {
+                                let mut stream = stream;
+                                let _ = write_too_many_connections_error(
+                                    &mut stream,
+                                    MAX_API_CONNECTIONS,
+                                );
+                                return;
+                            }
+                        };
                         if let Err(err) = handle_connection(
                             stream,
                             &api_tx,
@@ -104,6 +131,7 @@ pub fn start_server_with_capabilities(
                         ) {
                             warn!(err = %err, "api connection failed");
                         }
+                        drop(slot);
                     });
                 }
                 Err(err) => {
@@ -121,6 +149,34 @@ pub fn start_server_with_capabilities(
         identity,
         running,
     })
+}
+
+fn try_acquire_connection_slot(active: &AtomicUsize, limit: usize) -> Option<ConnectionSlot<'_>> {
+    loop {
+        let current = active.load(Ordering::Acquire);
+        if current >= limit {
+            return None;
+        }
+        if active
+            .compare_exchange(current, current + 1, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            return Some(ConnectionSlot { active });
+        }
+    }
+}
+
+fn write_too_many_connections_error(stream: &mut LocalStream, limit: usize) -> io::Result<()> {
+    write_json_line_allow_disconnect(
+        stream,
+        &ErrorResponse {
+            id: String::new(),
+            error: ErrorBody {
+                code: "too_many_connections".into(),
+                message: format!("too many concurrent api connections (limit: {limit})"),
+            },
+        },
+    )
 }
 
 fn prepare_socket_path(path: &Path) -> std::io::Result<()> {
@@ -682,6 +738,17 @@ fn stream_subscriptions(
         return Err(err);
     }
 
+    for subscription in &mut subscriptions {
+        if let Some(event) = subscription.startup_event() {
+            if let Err(err) = write_json_line(&mut stream, &event) {
+                if is_connection_closed_error(&err) {
+                    return Ok(());
+                }
+                return Err(err);
+            }
+        }
+    }
+
     loop {
         if should_stop_connection(&mut stream, running)? {
             return Ok(());
@@ -822,12 +889,11 @@ mod tests {
     use std::io::{BufRead, BufReader};
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::Mutex;
     use tokio::sync::mpsc;
 
     fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
+        crate::config::test_config_env_lock()
     }
 
     fn unique_test_path(name: &str) -> PathBuf {
@@ -1043,6 +1109,30 @@ mod tests {
         let response = thread.join().unwrap();
         let parsed: SuccessResponse = serde_json::from_str(&response).unwrap();
         assert_eq!(parsed.id, "req_2");
+    }
+
+    #[test]
+    fn connection_slot_rejects_when_limit_reached_and_releases_on_drop() {
+        let active = AtomicUsize::new(0);
+        let slot = try_acquire_connection_slot(&active, 1).expect("first slot");
+        assert_eq!(active.load(Ordering::Acquire), 1);
+        assert!(try_acquire_connection_slot(&active, 1).is_none());
+        drop(slot);
+        assert_eq!(active.load(Ordering::Acquire), 0);
+        assert!(try_acquire_connection_slot(&active, 1).is_some());
+    }
+
+    #[test]
+    fn too_many_connections_response_uses_expected_error_code() {
+        let (mut client, mut server, _path) = local_stream_pair("too-many-connections");
+        write_too_many_connections_error(&mut server, 7).unwrap();
+
+        let response: serde_json::Value = serde_json::from_str(&read_line(&mut client)).unwrap();
+        assert_eq!(response["error"]["code"], "too_many_connections");
+        assert_eq!(
+            response["error"]["message"],
+            "too many concurrent api connections (limit: 7)"
+        );
     }
 
     #[test]
@@ -1319,6 +1409,94 @@ mod tests {
 
         let result = done_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         assert!(result.is_ok());
+        server_thread.join().unwrap();
+    }
+
+    #[test]
+    fn pane_output_subscription_streams_initial_and_live_chunks() {
+        let (api_tx, mut api_rx) = mpsc::unbounded_channel::<ApiRequestMessage>();
+        let responder = std::thread::spawn(move || {
+            let mut pane_read_count = 0_u8;
+            while let Some(msg) = api_rx.blocking_recv() {
+                let Method::PaneRead(_) = msg.request.method else {
+                    panic!("unexpected request: {:?}", msg.request.method);
+                };
+                pane_read_count = pane_read_count.saturating_add(1);
+                let (text, revision) = match pane_read_count {
+                    1 => ("before-sub\n".to_string(), 2),
+                    2 => ("before-sub\n".to_string(), 2),
+                    _ => ("before-sub\nafter-sub\n".to_string(), 3),
+                };
+                let response = serde_json::to_string(&SuccessResponse {
+                    id: msg.request.id,
+                    result: ResponseResult::PaneRead {
+                        read: crate::api::schema::PaneReadResult {
+                            pane_id: "pane_1".into(),
+                            workspace_id: "workspace_1".into(),
+                            tab_id: "tab_1".into(),
+                            source: crate::api::schema::ReadSource::Recent,
+                            format: crate::api::schema::ReadFormat::Text,
+                            text,
+                            revision,
+                            truncated: false,
+                        },
+                    },
+                })
+                .unwrap();
+                msg.respond_to.send(response).unwrap();
+            }
+        });
+
+        let (mut client, server, _path) = local_stream_pair("api-pane-output");
+        client
+            .write_all(
+                br#"{"id":"sub_output","method":"events.subscribe","params":{"subscriptions":[{"type":"pane.output","pane_id":"pane_1","source":"recent","format":"text","initial_tail_lines":40}]}}"#,
+            )
+            .unwrap();
+        client.write_all(b"\n").unwrap();
+        client.flush().unwrap();
+
+        let running = Arc::new(AtomicBool::new(true));
+        let server_running = Arc::clone(&running);
+        let event_hub = EventHub::default();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let server_thread = std::thread::spawn(move || {
+            let result = handle_connection(server, &api_tx, &event_hub, &server_running, None);
+            done_tx.send(result).unwrap();
+        });
+
+        let ack: serde_json::Value = serde_json::from_str(&read_line(&mut client)).unwrap();
+        assert_eq!(ack["id"], "sub_output");
+        assert_eq!(ack["result"]["type"], "subscription_started");
+
+        let mut saw_initial_chunk = false;
+        let mut saw_live_chunk = false;
+        for _ in 0..2 {
+            let event: serde_json::Value = serde_json::from_str(&read_line(&mut client)).unwrap();
+            assert_eq!(event["event"], "pane.output");
+            assert_eq!(event["data"]["pane_id"], "pane_1");
+            assert_eq!(event["data"]["source"], "recent");
+            assert_eq!(event["data"]["format"], "text");
+            assert_eq!(event["data"]["gap"], false);
+
+            let chunk = event["data"]["chunk"].as_str().unwrap_or_default();
+            if chunk == "before-sub\n" {
+                saw_initial_chunk = true;
+            }
+            if chunk.contains("after-sub") {
+                assert_eq!(event["data"]["initial"], false);
+                saw_live_chunk = true;
+            }
+        }
+        assert!(saw_initial_chunk, "expected pane.output startup chunk");
+        assert!(saw_live_chunk, "expected pane.output live delta chunk");
+
+        drop(client);
+        running.store(false, Ordering::Relaxed);
+
+        let result = done_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(result.is_ok());
+        responder.join().unwrap();
         server_thread.join().unwrap();
     }
 }

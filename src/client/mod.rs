@@ -40,8 +40,8 @@ use crate::protocol::render_ansi;
 #[cfg(unix)]
 use crate::protocol::MAX_CLIPBOARD_IMAGE_PAYLOAD;
 use crate::protocol::{
-    self, AttachScrollDirection, AttachScrollSource, ClientKeybindings, ClientLaunchMode,
-    ClientMessage, NotifyKind, RenderEncoding, ServerMessage, MAX_FRAME_SIZE,
+    self, apply_frame_delta, AttachScrollDirection, AttachScrollSource, ClientKeybindings,
+    ClientLaunchMode, ClientMessage, NotifyKind, RenderEncoding, ServerMessage, MAX_FRAME_SIZE,
     MAX_GRAPHICS_FRAME_SIZE, PROTOCOL_VERSION,
 };
 use crate::server::socket_paths::client_socket_path;
@@ -67,6 +67,10 @@ struct ClientLoopConfig {
 struct ClientState {
     /// Stateful semantic-frame encoder used when the server sends FrameData.
     blit_encoder: render_ansi::BlitEncoder,
+    /// Last full semantic frame reconstructed from keyframes and deltas.
+    semantic_frame: Option<crate::protocol::FrameData>,
+    /// Sequence number of the last semantic delta applied since the latest keyframe.
+    semantic_seq: u64,
     /// Whether host mouse capture is currently active.
     mouse_capture_active: bool,
     /// Whether the host terminal currently reports all keys as Kitty sequences.
@@ -663,7 +667,8 @@ impl Drop for TerminalGuard {
 fn requested_render_encoding() -> RenderEncoding {
     match std::env::var("HERDR_RENDER_ENCODING").ok().as_deref() {
         Some("terminal-ansi" | "terminal_ansi" | "ansi") => RenderEncoding::TerminalAnsi,
-        _ => RenderEncoding::SemanticFrame,
+        Some("semantic-delta" | "semantic_delta" | "delta") => RenderEncoding::SemanticDeltaFrame,
+        _ => RenderEncoding::SemanticDeltaFrame,
     }
 }
 
@@ -1293,6 +1298,8 @@ async fn run_client_loop(
 
     let mut state = ClientState {
         blit_encoder: render_ansi::BlitEncoder::new(),
+        semantic_frame: None,
+        semantic_seq: 0,
         mouse_capture_active: config.mouse_capture_active,
         keyboard_report_all_active: false,
         reported_size: (cols, rows),
@@ -1540,6 +1547,54 @@ async fn run_client_loop(
                     let _ =
                         write_encoded_frame_with_graphics(&mut stdout, &encoded.bytes, graphics);
                     let _ = stdout.flush();
+                    state.semantic_frame = Some(frame_data.clone());
+                    state.semantic_seq = 0;
+                    state.blit_encoder.commit(frame_data, encoded);
+                    state.repaint_pending = false;
+                }
+                ServerMessage::FrameDelta {
+                    seq,
+                    base_seq,
+                    cell_runs,
+                    cursor,
+                    graphics,
+                } => {
+                    let Some(current) = state.semantic_frame.take() else {
+                        state.request_repaint();
+                        continue;
+                    };
+                    if base_seq != state.semantic_seq {
+                        state.request_repaint();
+                        state.semantic_frame = Some(current);
+                        continue;
+                    }
+                    let frame_data = apply_frame_delta(current, &cell_runs, cursor, graphics);
+                    let frame_data = if state.draw_host_cursor {
+                        render_ansi::frame_with_drawn_cursor(frame_data)
+                    } else {
+                        frame_data
+                    };
+                    let encoded = if state.draw_host_cursor {
+                        state.blit_encoder.encode_with_suppressed_visible_cursor(
+                            &frame_data,
+                            state.repaint_pending,
+                        )
+                    } else {
+                        state
+                            .blit_encoder
+                            .encode(&frame_data, state.repaint_pending)
+                    };
+                    let mut stdout = io::stdout();
+                    let graphics = if state.kitty_graphics_enabled {
+                        frame_data.graphics.as_slice()
+                    } else {
+                        &[]
+                    };
+                    let _ =
+                        write_encoded_frame_with_graphics(&mut stdout, &encoded.bytes, graphics);
+                    let _ = stdout.flush();
+                    state.semantic_seq = seq;
+                    state.semantic_frame = Some(frame_data.clone());
                     state.blit_encoder.commit(frame_data, encoded);
                     state.repaint_pending = false;
                 }
@@ -2251,6 +2306,17 @@ mod tests {
     }
 
     #[test]
+    fn requested_render_encoding_defaults_to_semantic_delta() {
+        let _guard = env_lock().lock().unwrap();
+        let _env = EnvVarsRemovedGuard::new(&["HERDR_RENDER_ENCODING"]);
+
+        assert_eq!(
+            requested_render_encoding(),
+            RenderEncoding::SemanticDeltaFrame
+        );
+    }
+
+    #[test]
     fn host_cursor_policy_auto_uses_platform_default() {
         assert_eq!(
             should_draw_host_cursor(crate::config::HostCursorModeConfig::Auto),
@@ -2801,7 +2867,9 @@ mod tests {
 
     #[test]
     fn reload_local_client_config_refreshes_local_client_presentation_state() {
-        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let _guard = crate::config::test_config_env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let path = std::env::temp_dir().join(format!(
             "herdr-client-config-reload-{}-{}.toml",
             std::process::id(),

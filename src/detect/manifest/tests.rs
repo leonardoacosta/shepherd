@@ -40,7 +40,9 @@ id = "codex"
 }
 
 fn with_manifest_dirs<T>(name: &str, f: impl FnOnce() -> T) -> T {
-    let _guard = crate::config::test_config_env_lock().lock().unwrap();
+    let _guard = crate::config::test_config_env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let old_config = std::env::var_os("XDG_CONFIG_HOME");
     let old_state = std::env::var_os("XDG_STATE_HOME");
     let base = std::env::temp_dir().join(format!(
@@ -85,6 +87,46 @@ fn write_local_codex(content: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, content).unwrap();
     reload_manifests();
+}
+
+#[test]
+fn hot_path_skips_rule_diagnostics_but_explain_keeps_evidence() {
+    with_manifest_dirs("hot-path-diagnostics", || {
+        write_local_codex(&rules_manifest(
+            r#"
+[[rules]]
+id = "test"
+state = "working"
+region = "whole_recent"
+contains = ["match me"]
+regex = ["match me"]
+"#,
+        ));
+
+        let loaded = load_manifest(Agent::Codex).expect("manifest should load");
+        let input = DetectionInput {
+            screen: "match me",
+            osc_title: "",
+            osc_progress: "",
+        };
+
+        let hot = evaluate_loaded_manifest(Agent::Codex, input, loaded.clone(), false);
+        assert!(hot.evaluated_rules.is_empty());
+
+        let explain = evaluate_loaded_manifest(Agent::Codex, input, loaded, true);
+        assert_eq!(explain.evaluated_rules.len(), 1);
+        assert_eq!(explain.evaluated_rules[0].id, "test");
+        assert!(explain.evaluated_rules[0].matched);
+        assert_eq!(
+            explain.evaluated_rules[0].evidence.contains,
+            vec!["match me"]
+        );
+        assert_eq!(explain.evaluated_rules[0].evidence.regex, vec!["match me"]);
+        assert_eq!(
+            explain.evaluated_rules[0].evidence.region_preview,
+            "match me"
+        );
+    });
 }
 
 #[test]

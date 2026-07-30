@@ -743,7 +743,7 @@ fn graceful_shutdown_sends_server_shutdown_to_client() {
         }
     }
 
-    // The client should receive a ServerShutdown message (variant 4)
+    // The client should receive a ServerShutdown message (variant 5)
     // before the connection is closed, not just an abrupt EOF.
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
@@ -752,8 +752,8 @@ fn graceful_shutdown_sends_server_shutdown_to_client() {
     match result {
         Ok((variant, _payload)) => {
             assert_eq!(
-                variant, 4,
-                "expected ServerShutdown (variant 4), got variant {variant}"
+                variant, 5,
+                "expected ServerShutdown (variant 5), got variant {variant}"
             );
         }
         Err(e) => {
@@ -877,17 +877,18 @@ fn client_receives_notify_on_agent_state_change() {
     let mut report_response = String::new();
     report_reader.read_line(&mut report_response).unwrap();
 
-    // Read messages from the client stream and look for Notify (variant 5).
-    // Notify = ServerMessage variant index 5.
+    // Read messages from the client stream and look for Notify (variant 6).
+    // Notify = ServerMessage variant index 6.
+    // Full-suite runs can queue additional frame traffic before the notify.
     stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
     let mut found_notify = false;
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
         match read_server_message(&mut stream) {
             Ok((variant, _payload)) => {
-                if variant == 5 {
+                if variant == 6 {
                     // ServerMessage::Notify — found it!
                     found_notify = true;
                     break;
@@ -973,7 +974,7 @@ fn client_receives_notify_on_agent_state_change() {
     while Instant::now() < deadline {
         match read_server_message(&mut stream) {
             Ok((variant, _payload)) => {
-                if variant == 5 {
+                if variant == 6 {
                     // Found a Notify message — that's good enough.
                     // The test already verified the Blocked→Notify path above.
                     found_done_notify = true;

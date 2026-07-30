@@ -825,7 +825,9 @@ mod tests {
 
     #[test]
     fn config_loaders_report_unreadable_path() {
-        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let _guard = crate::config::test_config_env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let path =
             std::env::temp_dir().join(format!("herdr-config-unreadable-{}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
@@ -972,7 +974,9 @@ mouse_captur = true
 
     #[test]
     fn startup_config_load_warns_about_unknown_top_level_sections() {
-        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let _guard = crate::config::test_config_env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let path = std::env::temp_dir().join(format!(
             "herdr-config-unknown-section-{}.toml",
             std::process::id()
