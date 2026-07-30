@@ -1,0 +1,15 @@
+
+     ▄▀▀▄
+    ▀▀▀▀▀▀
+   ▀▀▀▀▀▀▀▀
+  ▄▀▀    ▀▀▄
+ ▄▀▀      ▀▀▄
+
+ Open the URL below in your browser:
+ ──────────────────────────────────────────────────────────────────────────────────────
+ https://accounts.google.com/o/oauth2/auth?...&state=REDACTED
+ ──────────────────────────────────────────────────────────────────────────────────────
+
+ After authenticating, copy the code displayed in the browser and paste it below:
+
+ authorization code...

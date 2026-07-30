@@ -1,0 +1,5 @@
+
+ /workspace/detection-corpus
+❯ amp
+No API key found. Starting login flow...
+Would you like to log in to Amp? [(y)es, (n)o]:

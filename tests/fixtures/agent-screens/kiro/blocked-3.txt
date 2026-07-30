@@ -1,0 +1,10 @@
+
+Press enter to continue to the browser or esc to cancel
+
+✔ Select login method · Use with Builder ID
+
+Confirm the following code in the browser
+Code: REDACTED
+
+Open this URL: https://view.awsapps.com/start/#/device?user_code=REDACTED
+▰▰▰▰▱▱▱ Logging in...

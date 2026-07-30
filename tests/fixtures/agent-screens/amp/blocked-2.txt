@@ -1,0 +1,6 @@
+
+If your browser does not open automatically, visit:
+
+https://ampcode.com/auth/cli-login?authToken=REDACTED
+
+When prompted, paste your code here:

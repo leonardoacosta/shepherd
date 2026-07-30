@@ -1,0 +1,10 @@
+
+Welcome to Kiro CLI, let's get you signed in!
+
+Press enter to continue to the browser or esc to cancel
+
+? Select login method ›
+❯ Use with Builder ID
+  Use with Google
+  Use with GitHub
+  Use with Your Organization

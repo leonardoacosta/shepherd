@@ -331,6 +331,102 @@ fn detection_uses_cached_manifest_until_explicit_reload() {
     });
 }
 
+fn bundled_manifest_for_fixture_agent(agent: &str) -> Option<(Agent, LoadedManifest)> {
+    let (agent, manifest) = match agent {
+        "copilot" => (
+            Agent::GithubCopilot,
+            include_str!("../manifests/github-copilot.toml"),
+        ),
+        "amp" => (Agent::Amp, include_str!("../manifests/amp.toml")),
+        "agy" | "antigravity" => (
+            Agent::Antigravity,
+            include_str!("../manifests/antigravity.toml"),
+        ),
+        "kiro" => (Agent::Kiro, include_str!("../manifests/kiro.toml")),
+        _ => return None,
+    };
+    Some((
+        agent,
+        bundled_loaded_manifest(
+            agent,
+            parse_manifest(manifest).expect("bundled manifest should parse"),
+            None,
+            None,
+            false,
+        ),
+    ))
+}
+
+fn fixture_state_from_name(name: &str) -> Option<AgentState> {
+    let label = name.split('-').next()?;
+    match label {
+        "idle" => Some(AgentState::Idle),
+        "working" => Some(AgentState::Working),
+        "blocked" => Some(AgentState::Blocked),
+        _ => None,
+    }
+}
+
+#[test]
+fn bundled_manifest_golden_screen_fixtures_match_labeled_state() {
+    let fixture_root =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/agent-screens");
+    let fixture_agents: Vec<_> = std::fs::read_dir(&fixture_root)
+        .expect("agent screen fixture root should exist")
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|ty| ty.is_dir()))
+        .collect();
+    assert!(
+        !fixture_agents.is_empty(),
+        "expected at least one agent screen fixture directory"
+    );
+
+    for agent_dir in fixture_agents {
+        let agent_name = agent_dir.file_name();
+        let agent_name = agent_name.to_string_lossy();
+        let Some((agent, bundled)) = bundled_manifest_for_fixture_agent(&agent_name) else {
+            panic!("missing bundled manifest mapping for fixture agent {agent_name}");
+        };
+
+        let fixture_paths: Vec<_> = std::fs::read_dir(agent_dir.path())
+            .expect("fixture agent dir should load")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_ok_and(|ty| ty.is_file()))
+            .collect();
+        assert!(
+            !fixture_paths.is_empty(),
+            "expected at least one fixture for agent {agent_name}"
+        );
+
+        for fixture in fixture_paths {
+            let fixture_name = fixture.file_name();
+            let fixture_name = fixture_name.to_string_lossy();
+            let expected =
+                fixture_state_from_name(&fixture_name).expect("fixture name should encode state");
+            let screen = std::fs::read_to_string(fixture.path()).expect("fixture should read");
+            let explain = evaluate_loaded_manifest(
+                agent,
+                DetectionInput {
+                    screen: &screen,
+                    osc_title: "",
+                    osc_progress: "",
+                },
+                bundled.clone(),
+                true,
+            );
+            assert_eq!(
+                explain.state,
+                expected,
+                "fixture {} for agent {} classified as {:?} via rule {:?}",
+                fixture.path().display(),
+                agent_name,
+                explain.state,
+                explain.matched_rule.as_ref().map(|rule| rule.id.as_str())
+            );
+        }
+    }
+}
+
 #[test]
 fn all_bundled_manifests_parse_and_validate() {
     for agent in Agent::SCREEN_MANIFEST_AGENTS {

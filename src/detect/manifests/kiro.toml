@@ -30,7 +30,23 @@ any = [
   { contains = ["tool approvals"] },
 ]
 all = [
-  { any = [{ contains = ["approve all pending"] }, { contains = ["configure individually"] }, { contains = ["exit (cancel subagents)"] }] },
+  { any = [
+    { contains = ["approve all pending"] },
+    { contains = ["configure individually"] },
+    { contains = ["exit (cancel subagents)"] },
+  ] },
+]
+
+[[rules]]
+id = "login_prompt"
+state = "blocked"
+priority = 280
+region = "whole_recent"
+visible_blocker = true
+any = [
+  { contains = ["welcome to kiro cli, let's get you signed in!"] },
+  { contains = ["select login method"] },
+  { contains = ["confirm the following code in the browser"] },
 ]
 
 [[rules]]

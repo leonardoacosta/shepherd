@@ -17,6 +17,29 @@ any = [
 ]
 
 [[rules]]
+id = "login_prompt"
+state = "blocked"
+priority = 290
+region = "whole_recent"
+visible_blocker = true
+any = [
+  { all = [
+    { contains = ["welcome to the antigravity cli. you are currently not signed in."] },
+    { contains = ["select login method:"] },
+    { any = [
+      { contains = ["google oauth"] },
+      { contains = ["use a google cloud project"] },
+    ] },
+  ] },
+  { all = [
+    { contains = ["open the url below in your browser:"] },
+    { contains = ["after authenticating, copy the code displayed in the browser and paste it below:"] },
+    { contains = ["authorization code..."] },
+  ] },
+  { contains = ["got an error: token exchange failed: oauth2:"] },
+]
+
+[[rules]]
 id = "spinner_working"
 state = "working"
 priority = 100
