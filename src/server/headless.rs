@@ -2896,12 +2896,7 @@ pub fn run_server() -> io::Result<()> {
             .get(3)
             .map(PathBuf::from)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing handoff socket"))?;
-        let token = std::env::var(crate::server::handoff::HANDOFF_TOKEN_ENV_VAR).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "missing handoff token environment variable",
-            )
-        })?;
+        let token = handoff_import_token()?;
         return run_handoff_import_server(&socket_path, &token);
     }
 
@@ -3007,6 +3002,21 @@ fn take_startup_cwd() -> Option<PathBuf> {
     let cwd = std::env::var_os(crate::server::autodetect::STARTUP_CWD_ENV_VAR)?;
     std::env::remove_var(crate::server::autodetect::STARTUP_CWD_ENV_VAR);
     (!cwd.is_empty()).then(|| PathBuf::from(cwd))
+}
+
+#[cfg(unix)]
+fn handoff_import_token() -> io::Result<String> {
+    std::env::var(crate::server::handoff::HANDOFF_TOKEN_ENV_VAR).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "missing handoff token environment variable",
+        )
+    })
+}
+
+#[cfg(not(unix))]
+fn handoff_import_token() -> io::Result<String> {
+    Err(io::Error::other("live handoff is only supported on Unix"))
 }
 
 #[cfg(unix)]
