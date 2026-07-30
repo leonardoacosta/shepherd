@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Current protocol version. Bumped when wire format changes incompatibly.
-pub const PROTOCOL_VERSION: u32 = 18;
+pub const PROTOCOL_VERSION: u32 = 19;
 
 /// Maximum allowed frame payload size (2 MB). Frames larger than this are
 /// rejected to prevent denial-of-service via oversized length prefixes.
@@ -39,6 +39,8 @@ const LENGTH_PREFIX_BYTES: usize = 4;
 pub enum RenderEncoding {
     /// Send full semantic FrameData values. This is the local/default mode.
     SemanticFrame,
+    /// Send semantic keyframes plus cell-run deltas.
+    SemanticDeltaFrame,
     /// Send already-diffed terminal ANSI byte streams.
     TerminalAnsi,
 }
@@ -495,6 +497,15 @@ pub struct FrameData {
     pub graphics: Vec<u8>,
 }
 
+/// A contiguous run of updated cells within a frame's row-major cell buffer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FrameCellRun {
+    /// Starting row-major cell index of this run.
+    pub start: u32,
+    /// Replacement cells for this run.
+    pub cells: Vec<CellData>,
+}
+
 impl FrameData {
     /// Creates a `FrameData` from a ratatui `Buffer` and optional cursor.
     ///
@@ -586,6 +597,53 @@ impl FrameData {
     }
 }
 
+pub fn frame_cell_runs(previous: &FrameData, next: &FrameData) -> Vec<FrameCellRun> {
+    if previous.width != next.width || previous.height != next.height {
+        return vec![FrameCellRun {
+            start: 0,
+            cells: next.cells.clone(),
+        }];
+    }
+
+    let mut runs = Vec::new();
+    let mut index = 0usize;
+    while index < next.cells.len() {
+        if previous.cells.get(index) == next.cells.get(index) {
+            index += 1;
+            continue;
+        }
+
+        let start = index;
+        let mut cells = Vec::new();
+        while index < next.cells.len() && previous.cells.get(index) != next.cells.get(index) {
+            cells.push(next.cells[index].clone());
+            index += 1;
+        }
+        runs.push(FrameCellRun {
+            start: start as u32,
+            cells,
+        });
+    }
+    runs
+}
+
+pub fn apply_frame_delta(
+    mut frame: FrameData,
+    cell_runs: &[FrameCellRun],
+    cursor: Option<CursorState>,
+    graphics: Vec<u8>,
+) -> FrameData {
+    for run in cell_runs {
+        let start = run.start as usize;
+        let end = start.saturating_add(run.cells.len());
+        assert!(end <= frame.cells.len(), "frame delta run out of bounds");
+        frame.cells[start..end].clone_from_slice(&run.cells);
+    }
+    frame.cursor = cursor;
+    frame.graphics = graphics;
+    frame
+}
+
 /// Terminal ANSI bytes encoded by the server for network-efficient clients.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalFrame {
@@ -628,6 +686,20 @@ pub enum ServerMessage {
 
     /// A rendered frame to be displayed by a semantic-frame client.
     Frame(FrameData),
+
+    /// A semantic delta to apply against the client's last semantic frame.
+    FrameDelta {
+        /// Sequence number for this delta stream since the last keyframe.
+        seq: u64,
+        /// Expected last-applied semantic sequence number on the client.
+        base_seq: u64,
+        /// Updated cell runs in row-major order.
+        cell_runs: Vec<FrameCellRun>,
+        /// Cursor state after the delta is applied.
+        cursor: Option<CursorState>,
+        /// Graphics bytes after the delta is applied.
+        graphics: Vec<u8>,
+    },
 
     /// Terminal bytes to write directly for a terminal-ANSI client.
     Terminal(TerminalFrame),

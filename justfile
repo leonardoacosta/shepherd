@@ -3,9 +3,10 @@
 # Run tests
 test:
     cargo nextest run --locked --status-level fail --final-status-level fail --failure-output final --success-output never
-    python3 -m unittest scripts.test_agent_detection_manifest_check scripts.test_changelog scripts.test_config_reference_check scripts.test_docs_translation_parity scripts.test_hermes_integration_asset scripts.test_package_windows_conpty scripts.test_preview scripts.test_vendor_libghostty_vt scripts.test_vendor_portable_pty
+    python3 -m unittest scripts.test_agent_detection_manifest_check scripts.test_changelog scripts.test_config_reference_check scripts.test_docs_translation_parity scripts.test_hermes_integration_asset scripts.test_package_windows_conpty scripts.test_preview scripts.test_socket_api_reference_check scripts.test_vendor_libghostty_vt scripts.test_vendor_portable_pty scripts.test_vendor_upstream_drift
     just integration-assets-test
     just plugin-marketplace-test
+    just generated-api-client-test
 
 # Run one nextest filter, e.g. `just test-one codex_stale_working`
 test-one filter:
@@ -28,6 +29,7 @@ ci filter='all()': lint
     cargo nextest run --locked -E "{{filter}}" --status-level fail --final-status-level slow --failure-output final --success-output never
     just integration-assets-test
     just plugin-marketplace-test
+    just generated-api-client-test
 
 # Run Windows target lint from Unix/macOS to catch cfg(windows) compile and clippy failures before CI
 [unix]
@@ -38,7 +40,7 @@ windows-lint:
 # Check formatting + run unit tests + Windows target lint + maintenance script tests
 [unix]
 check: ci windows-lint
-    python3 -m unittest scripts.test_agent_detection_manifest_check scripts.test_changelog scripts.test_config_reference_check scripts.test_docs_translation_parity scripts.test_hermes_integration_asset scripts.test_package_windows_conpty scripts.test_preview scripts.test_vendor_libghostty_vt scripts.test_vendor_portable_pty
+    python3 -m unittest scripts.test_agent_detection_manifest_check scripts.test_changelog scripts.test_config_reference_check scripts.test_docs_translation_parity scripts.test_hermes_integration_asset scripts.test_package_windows_conpty scripts.test_preview scripts.test_socket_api_reference_check scripts.test_vendor_libghostty_vt scripts.test_vendor_portable_pty scripts.test_vendor_upstream_drift
     @echo "docs reminder: if this changes user-facing behavior, make sure the relevant release docs are updated or called out before release."
 
 [script("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File")]
@@ -70,6 +72,10 @@ integration-assets-test:
 plugin-marketplace-test:
     cd workers/plugin-marketplace && bun test
 
+# Run generated TypeScript API client checks
+generated-api-client-test:
+    cd clients/ts && bun install --frozen-lockfile && bun run generate:types:check && bun test
+
 # Build the vendored libghostty-vt source dist
 build-libghostty-vt:
     scripts/build_vendored_libghostty_vt.sh
@@ -78,6 +84,7 @@ build-libghostty-vt:
 release-docs-check:
     python3 scripts/agent_detection_manifest_check.py --require-website
     python3 scripts/config_reference_check.py
+    python3 scripts/socket_api_reference_check.py
     node website/scripts/docs-versions.mjs check
     @test -f docs/next/README.md
     @if ! diff -u CHANGELOG.md docs/next/CHANGELOG.md; then \

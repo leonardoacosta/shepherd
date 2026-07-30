@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::common::{AgentStatus, ReadSource};
+use super::common::{AgentStatus, ReadFormat, ReadSource};
 use super::panes::{PaneInfo, PaneReadResult, PaneScrollInfo};
 use super::tabs::TabInfo;
 use super::workspaces::WorkspaceInfo;
@@ -69,6 +69,16 @@ pub enum Subscription {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         lines: Option<u32>,
         r#match: OutputMatch,
+        #[serde(default = "super::common::default_true")]
+        strip_ansi: bool,
+    },
+    #[serde(rename = "pane.output")]
+    PaneOutput {
+        pane_id: String,
+        source: ReadSource,
+        format: ReadFormat,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        initial_tail_lines: Option<u32>,
         #[serde(default = "super::common::default_true")]
         strip_ansi: bool,
     },
@@ -366,6 +376,8 @@ pub struct EventEnvelope {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum SubscriptionEventKind {
+    #[serde(rename = "pane.output")]
+    PaneOutput,
     #[serde(rename = "pane.output_matched")]
     PaneOutputMatched,
     #[serde(rename = "pane.agent_status_changed")]
@@ -383,9 +395,22 @@ pub struct SubscriptionEventEnvelope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum SubscriptionEventData {
+    PaneOutput(PaneOutputEvent),
     PaneOutputMatched(PaneOutputMatchedEvent),
     PaneAgentStatusChanged(PaneAgentStatusChangedEvent),
     ScrollChanged(PaneScrollChangedEvent),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PaneOutputEvent {
+    pub pane_id: String,
+    pub source: ReadSource,
+    pub format: ReadFormat,
+    pub revision: u64,
+    pub chunk: String,
+    pub truncated: bool,
+    pub gap: bool,
+    pub initial: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

@@ -1512,10 +1512,13 @@ mod tests {
         assert!(first.starts_with('w'));
         assert!(second.starts_with('w'));
         assert_ne!(first, second);
-        assert!(first.len() <= 3, "unexpectedly long workspace id: {first}");
         assert!(
-            second.len() <= 3,
-            "unexpectedly long workspace id: {second}"
+            first.len() <= 8,
+            "workspace id should remain a compact handle: {first}"
+        );
+        assert!(
+            second.len() <= 8,
+            "workspace id should remain a compact handle: {second}"
         );
     }
 

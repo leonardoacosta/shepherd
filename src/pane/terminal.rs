@@ -2986,6 +2986,29 @@ mod tests {
     use ratatui::{layout::Rect, style::Color};
     use tokio::sync::mpsc;
 
+    struct KittyGraphicsTestGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        previous: bool,
+    }
+
+    impl KittyGraphicsTestGuard {
+        fn set(enabled: bool) -> Self {
+            let lock = crate::kitty_graphics::test_state_lock();
+            let previous = crate::kitty_graphics::is_enabled();
+            crate::kitty_graphics::set_enabled_under_test_lock(enabled);
+            Self {
+                _lock: lock,
+                previous,
+            }
+        }
+    }
+
+    impl Drop for KittyGraphicsTestGuard {
+        fn drop(&mut self) {
+            crate::kitty_graphics::set_enabled_under_test_lock(self.previous);
+        }
+    }
+
     fn text_cell(text: &str) -> crate::ghostty::ScreenTextCell {
         crate::ghostty::ScreenTextCell {
             wide: crate::ghostty::CellWide::Narrow,
@@ -4653,7 +4676,7 @@ mod tests {
 
     #[test]
     fn kitty_graphics_write_requests_render_with_settle_backstop() {
-        crate::kitty_graphics::set_enabled(true);
+        let _guard = KittyGraphicsTestGuard::set(true);
         let (tx, _rx) = mpsc::channel(4);
         let terminal = crate::ghostty::Terminal::new(80, 24, 0).unwrap();
         let pane_terminal = GhosttyPaneTerminal::new(terminal, tx.clone()).unwrap();
@@ -4715,7 +4738,7 @@ mod tests {
 
     #[test]
     fn render_blanks_kitty_unicode_placeholders_when_graphics_enabled() {
-        crate::kitty_graphics::set_enabled(true);
+        let _guard = KittyGraphicsTestGuard::set(true);
         let (tx, _rx) = mpsc::channel(4);
         let terminal = crate::ghostty::Terminal::new(20, 5, 0).unwrap();
         let pane = GhosttyPaneTerminal::new(terminal, tx).unwrap();
@@ -4730,7 +4753,6 @@ mod tests {
         terminal
             .draw(|frame| pane.render(frame, Rect::new(0, 0, 20, 5), false))
             .unwrap();
-        crate::kitty_graphics::set_enabled(false);
 
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer[(0, 0)].symbol(), "b");

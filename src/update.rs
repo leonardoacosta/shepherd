@@ -551,6 +551,14 @@ impl Drop for DownloadedUpdate {
 /// Download a release to a prepared executable temp file without touching the running server.
 #[cfg(not(windows))]
 fn download_update(release: &ReleaseInfo) -> Result<DownloadedUpdate, String> {
+    if !release.download_url.starts_with("https://") {
+        return Err("update download URL must use https".into());
+    }
+    let expected = release
+        .sha256
+        .as_deref()
+        .ok_or("stable update asset has no checksum")?;
+
     let current_exe = env::current_exe().map_err(|e| format!("can't find current binary: {e}"))?;
 
     let parent = current_exe.parent().ok_or("can't find binary directory")?;
@@ -573,6 +581,7 @@ fn download_update(release: &ReleaseInfo) -> Result<DownloadedUpdate, String> {
     // Download the exact asset URL (pinned to the release we checked)
     let status = crate::noninteractive_process::curl_command()
         .args(["-sfL", "--max-time", "120", "-o"])
+        .args(["--proto", "=https", "--proto-redir", "=https"])
         .arg(&tmp_path)
         .arg(&release.download_url)
         .status()
@@ -583,15 +592,13 @@ fn download_update(release: &ReleaseInfo) -> Result<DownloadedUpdate, String> {
         return Err("download failed".into());
     }
 
-    if let Some(expected) = &release.sha256 {
-        if let Err(e) = crate::checksum::verify_sha256(&tmp_path, expected) {
-            let _ = fs::remove_file(&tmp_path);
-            return Err(format!(
-                "downloaded update checksum verification failed: {e}"
-            ));
-        }
-        tracing::info!(sha256 = %expected, "downloaded update checksum verified");
+    if let Err(e) = crate::checksum::verify_sha256(&tmp_path, expected) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(format!(
+            "downloaded update checksum verification failed: {e}"
+        ));
     }
+    tracing::info!(sha256 = %expected, "downloaded update checksum verified");
 
     // Make executable
     #[cfg(unix)]
@@ -2324,6 +2331,27 @@ mod tests {
         }
     }
 
+    #[test]
+    fn download_update_rejects_missing_checksum() {
+        let release = fake_release("9.8.7", Some(77));
+        match download_update(&release) {
+            Ok(_) => panic!("expected missing checksum error"),
+            Err(err) => assert_eq!(err, "stable update asset has no checksum"),
+        }
+    }
+
+    #[test]
+    fn download_update_rejects_non_https_url() {
+        let mut release = fake_release("9.8.7", Some(77));
+        release.download_url = "http://example.com/herdr".to_string();
+        release.sha256 =
+            Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string());
+        match download_update(&release) {
+            Ok(_) => panic!("expected non-https error"),
+            Err(err) => assert_eq!(err, "update download URL must use https"),
+        }
+    }
+
     fn set_test_config_home(name: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -3444,11 +3472,11 @@ mod tests {
             "macos-x86_64",
             "macos-aarch64",
         ] {
-            let url = &manifest
+            let asset = manifest
                 .assets
                 .get(target)
-                .unwrap_or_else(|| panic!("missing asset URL for {target}"))
-                .url;
+                .unwrap_or_else(|| panic!("missing asset URL for {target}"));
+            let url = &asset.url;
             assert!(
                 url.contains(&format!("/releases/download/v{}/", manifest.version)),
                 "unexpected release URL for {target}: {url}"
@@ -3456,6 +3484,10 @@ mod tests {
             assert!(
                 url.ends_with(&format!("herdr-{target}")),
                 "unexpected asset name for {target}: {url}"
+            );
+            assert!(
+                asset.sha256.as_deref().is_some(),
+                "stable asset should carry sha256: {target}"
             );
         }
 
@@ -3470,10 +3502,24 @@ mod tests {
                 "macos-x86_64",
                 "macos-aarch64",
             ] {
-                let url = assets
-                    .get(target)
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_else(|| panic!("missing asset URL for {version} {target}"));
+                let Some(asset) = assets.get(target) else {
+                    assert_ne!(
+                        version, &manifest.version,
+                        "missing asset URL for current release {version} {target}"
+                    );
+                    continue;
+                };
+                let (url, sha256) = match asset {
+                    serde_json::Value::String(url) => (url.as_str(), None),
+                    serde_json::Value::Object(object) => (
+                        object
+                            .get("url")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_else(|| panic!("missing asset URL for {version} {target}")),
+                        object.get("sha256").and_then(serde_json::Value::as_str),
+                    ),
+                    _ => panic!("invalid asset entry for {version} {target}"),
+                };
                 assert!(
                     url.contains(&format!("/releases/download/v{version}/")),
                     "unexpected release URL for {version} {target}: {url}"
@@ -3482,6 +3528,12 @@ mod tests {
                     url.ends_with(&format!("herdr-{target}")),
                     "unexpected asset name for {version} {target}: {url}"
                 );
+                if version == &manifest.version {
+                    assert!(
+                        sha256.is_some(),
+                        "current release asset should carry sha256: {version} {target}"
+                    );
+                }
             }
         }
     }

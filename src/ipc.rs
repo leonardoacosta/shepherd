@@ -1,6 +1,8 @@
 use std::fs;
 use std::io::{self, Read};
 #[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 
@@ -156,24 +158,33 @@ pub(crate) fn poll_local_stream_read(
 
 #[cfg(unix)]
 fn probe_stream_closed(stream: &mut LocalStream) -> io::Result<bool> {
-    stream.set_nonblocking(true)?;
+    let LocalStream::UdSocket(stream) = stream;
     let mut probe = [0u8; 1];
-    let status = match stream.read(&mut probe) {
-        Ok(0) => Ok(true),
-        Ok(_) => Ok(true),
-        Err(err)
+    let received = unsafe {
+        libc::recv(
+            stream.inner().as_raw_fd(),
+            probe.as_mut_ptr().cast(),
+            probe.len(),
+            libc::MSG_PEEK | libc::MSG_DONTWAIT,
+        )
+    };
+    match received {
+        0 => Ok(true),
+        received if received > 0 => Ok(false),
+        _ => {
+            let err = io::Error::last_os_error();
             if matches!(
                 err.kind(),
                 io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
-            ) =>
-        {
-            Ok(false)
+            ) {
+                Ok(false)
+            } else if is_connection_closed_error(&err) {
+                Ok(true)
+            } else {
+                Err(err)
+            }
         }
-        Err(err) if is_connection_closed_error(&err) => Ok(true),
-        Err(err) => Err(err),
-    };
-    stream.set_nonblocking(false)?;
-    status
+    }
 }
 
 #[cfg(windows)]
@@ -288,9 +299,9 @@ pub(crate) fn restrict_socket_permissions(_path: &Path, _mode: u32) -> io::Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(windows)]
     use interprocess::local_socket::traits::Listener as _;
-    #[cfg(windows)]
+    #[cfg(unix)]
+    use std::io::Write;
     use std::path::PathBuf;
 
     #[test]
@@ -302,6 +313,46 @@ mod tests {
             stale_socket_connect_error(io::ErrorKind::WouldBlock),
             cfg!(windows)
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_probe_peeks_without_consuming_live_bytes() {
+        let path = temp_socket_marker_path("peek-live-byte");
+        let _ = fs::remove_file(&path);
+
+        let listener = bind_local_listener(&path).expect("bind listener");
+        let mut client = connect_local_stream(&path).expect("connect client");
+        let mut server = listener.accept().expect("accept server");
+
+        client.write_all(b"x").expect("client writes probe byte");
+
+        assert!(
+            !local_stream_peer_closed(&mut server).expect("probe live stream"),
+            "live stream with pending data should not look closed"
+        );
+
+        let mut buf = [0u8; 1];
+        assert_eq!(server.read(&mut buf).expect("server reads byte"), 1);
+        assert_eq!(buf[0], b'x');
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_probe_reports_closed_peer() {
+        let path = temp_socket_marker_path("peek-closed-peer");
+        let _ = fs::remove_file(&path);
+
+        let listener = bind_local_listener(&path).expect("bind listener");
+        let client = connect_local_stream(&path).expect("connect client");
+        let mut server = listener.accept().expect("accept server");
+        drop(client);
+
+        assert!(local_stream_peer_closed(&mut server).expect("probe closed stream"));
+
+        let _ = fs::remove_file(path);
     }
 
     #[cfg(windows)]
@@ -349,7 +400,6 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
-    #[cfg(windows)]
     fn temp_socket_marker_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("herdr-{name}-{}.sock", std::process::id()))
     }

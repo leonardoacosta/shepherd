@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use tracing::warn;
 
+use super::atomic::{atomic_write, ensure_private_parent_dir};
 use super::snapshot::{
     parse_history_snapshot, parse_snapshot, snapshot_file_version, SessionHistorySnapshot,
     SessionSnapshot, SNAPSHOT_VERSION,
@@ -47,16 +48,9 @@ pub(super) fn save_to_path(path: &Path, snapshot: &SessionSnapshot) -> std::io::
 
 fn save_json_to_path<T: serde::Serialize>(path: &Path, snapshot: &T) -> std::io::Result<()> {
     let target = resolve_write_target(path)?;
-    if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+    ensure_private_parent_dir(&target)?;
     let json = serde_json::to_string_pretty(snapshot)?;
-    let tmp_path = target.with_extension("json.tmp");
-    std::fs::write(&tmp_path, &json)?;
-    if let Err(err) = std::fs::rename(&tmp_path, &target) {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(err);
-    }
+    atomic_write(&target, json.as_bytes())?;
     Ok(())
 }
 
@@ -66,12 +60,12 @@ pub(super) fn save_to_paths(
     snapshot: &SessionSnapshot,
     history: Option<&SessionHistorySnapshot>,
 ) -> std::io::Result<()> {
-    save_to_path(session_path, snapshot)?;
     if let Some(history) = history {
         save_json_to_path(history_path, history)?;
     } else {
         clear_path(history_path)?;
     }
+    save_to_path(session_path, snapshot)?;
     Ok(())
 }
 

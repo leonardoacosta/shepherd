@@ -41,6 +41,8 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 const MAX_INPUT_PAYLOAD: usize = 1024 * 1024; // 1 MB
 /// Maximum structured input events accepted in one client message.
 const MAX_INPUT_EVENT_BATCH: usize = 4096;
+const CONTROL_QUEUE_MAX_MESSAGES: usize = 64;
+const CONTROL_QUEUE_MAX_BYTES: usize = 512 * 1024;
 
 /// Channels owned by the server side of a client writer thread.
 #[derive(Clone, Debug)]
@@ -188,10 +190,23 @@ struct ClientWriterQueue {
 
 #[derive(Debug, Default)]
 struct ClientWriterQueueState {
-    control: VecDeque<Vec<u8>>,
+    control: VecDeque<ControlQueueItem>,
+    control_bytes: usize,
     render: Option<Vec<u8>>,
     senders: usize,
     writer_alive: bool,
+}
+
+#[derive(Debug)]
+struct ControlQueueItem {
+    data: Vec<u8>,
+    class: ControlMessageClass,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ControlMessageClass {
+    MustDeliver,
+    Droppable,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -227,7 +242,14 @@ impl ClientWriterQueue {
         if !state.writer_alive {
             return Err(SendError(data));
         }
-        state.control.push_back(data);
+        let item = ControlQueueItem::new(data)?;
+        if !state.make_room_for_control(&item) {
+            state.writer_alive = false;
+            self.ready.notify_all();
+            return Err(SendError(item.data));
+        }
+        state.control_bytes = state.control_bytes.saturating_add(item.data.len());
+        state.control.push_back(item);
         self.ready.notify_one();
         Ok(())
     }
@@ -248,8 +270,9 @@ impl ClientWriterQueue {
     fn recv(&self) -> Option<ClientWriteItem> {
         let mut state = self.lock_state();
         loop {
-            if let Some(data) = state.control.pop_front() {
-                return Some(ClientWriteItem::Control(data));
+            if let Some(item) = state.control.pop_front() {
+                state.control_bytes = state.control_bytes.saturating_sub(item.data.len());
+                return Some(ClientWriteItem::Control(item.data));
             }
             if let Some(data) = state.render.take() {
                 self.ready.notify_one();
@@ -276,6 +299,59 @@ impl ClientWriterQueue {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
+}
+
+impl ControlQueueItem {
+    fn new(data: Vec<u8>) -> Result<Self, SendError<Vec<u8>>> {
+        let class = classify_control_message(&data).map_err(|_| SendError(data.clone()))?;
+        Ok(Self { data, class })
+    }
+}
+
+impl ClientWriterQueueState {
+    fn make_room_for_control(&mut self, item: &ControlQueueItem) -> bool {
+        if item.class == ControlMessageClass::MustDeliver
+            && item.data.len() > CONTROL_QUEUE_MAX_BYTES
+        {
+            return false;
+        }
+
+        while self.control.len() >= CONTROL_QUEUE_MAX_MESSAGES
+            || self.control_bytes.saturating_add(item.data.len()) > CONTROL_QUEUE_MAX_BYTES
+        {
+            let Some(index) = self
+                .control
+                .iter()
+                .position(|queued| queued.class == ControlMessageClass::Droppable)
+            else {
+                return false;
+            };
+            let removed = self
+                .control
+                .remove(index)
+                .expect("droppable control item should exist");
+            self.control_bytes = self.control_bytes.saturating_sub(removed.data.len());
+        }
+        true
+    }
+}
+
+fn classify_control_message(data: &[u8]) -> io::Result<ControlMessageClass> {
+    let mut cursor = std::io::Cursor::new(data);
+    let message: ServerMessage =
+        protocol::read_message(&mut cursor, MAX_GRAPHICS_FRAME_SIZE).map_err(io::Error::other)?;
+    Ok(match message {
+        ServerMessage::ServerShutdown { .. } => ControlMessageClass::MustDeliver,
+        ServerMessage::Graphics { .. }
+        | ServerMessage::Notify { .. }
+        | ServerMessage::Clipboard { .. }
+        | ServerMessage::WindowTitle { .. }
+        | ServerMessage::ReloadSoundConfig
+        | ServerMessage::MouseCapture { .. }
+        | ServerMessage::KittyKeyboardReportAll { .. }
+        | ServerMessage::PrefixInputSource { .. } => ControlMessageClass::Droppable,
+        _ => ControlMessageClass::MustDeliver,
+    })
 }
 
 /// Internal event sent from client transport threads to the main event loop.
@@ -881,6 +957,17 @@ mod tests {
         bytes
     }
 
+    fn queue_droppable_message(
+        writer: &ClientWriter,
+        title: impl Into<Option<String>>,
+    ) -> Result<(), SendError<Vec<u8>>> {
+        writer
+            .control
+            .send(frame_server_message(&ServerMessage::WindowTitle {
+                title: title.into(),
+            }))
+    }
+
     #[test]
     fn client_writer_queue_keeps_render_slot_bounded() {
         let (writer, _queue) = test_queue_writer();
@@ -896,6 +983,68 @@ mod tests {
             writer.render.try_send(second),
             Err(TrySendError::Full(_))
         ));
+    }
+
+    #[test]
+    fn control_queue_drops_oldest_droppable_messages_when_full() {
+        let (writer, queue) = test_queue_writer();
+        for i in 0..CONTROL_QUEUE_MAX_MESSAGES {
+            queue_droppable_message(&writer, Some(format!("drop-{i}"))).expect("queue droppable");
+        }
+
+        queue_droppable_message(&writer, Some("newest".to_string())).expect("queue replacement");
+
+        let state = queue.lock_state();
+        assert_eq!(state.control.len(), CONTROL_QUEUE_MAX_MESSAGES);
+        assert!(state.control_bytes <= CONTROL_QUEUE_MAX_BYTES);
+
+        let first: ServerMessage = protocol::read_message(
+            &mut std::io::Cursor::new(&state.control.front().expect("front").data),
+            MAX_FRAME_SIZE,
+        )
+        .expect("decode first");
+        match first {
+            ServerMessage::WindowTitle { title } => {
+                assert_eq!(title.as_deref(), Some("drop-1"));
+            }
+            other => panic!("expected window title, got {other:?}"),
+        }
+
+        let last: ServerMessage = protocol::read_message(
+            &mut std::io::Cursor::new(&state.control.back().expect("back").data),
+            MAX_FRAME_SIZE,
+        )
+        .expect("decode last");
+        match last {
+            ServerMessage::WindowTitle { title } => {
+                assert_eq!(title.as_deref(), Some("newest"));
+            }
+            other => panic!("expected window title, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn control_queue_rejects_must_deliver_overflow_when_only_must_deliver_remain() {
+        let (writer, queue) = test_queue_writer();
+        for i in 0..CONTROL_QUEUE_MAX_MESSAGES {
+            writer
+                .control
+                .send(frame_server_message(&ServerMessage::ServerShutdown {
+                    reason: Some(format!("shutdown-{i}")),
+                }))
+                .expect("queue shutdown");
+        }
+
+        let result = writer
+            .control
+            .send(frame_server_message(&ServerMessage::ServerShutdown {
+                reason: Some("overflow".to_string()),
+            }));
+
+        assert!(matches!(result, Err(SendError(_))));
+        let state = queue.lock_state();
+        assert!(!state.writer_alive);
+        assert_eq!(state.control.len(), CONTROL_QUEUE_MAX_MESSAGES);
     }
 
     #[test]
@@ -1009,13 +1158,18 @@ mod tests {
         drop(client_stream);
         writer
             .control
-            .send(vec![b'x'; 1024 * 1024])
+            .send(frame_server_message(&ServerMessage::ReloadSoundConfig))
             .expect("message is accepted before the writer observes socket failure");
         done_rx
             .recv_timeout(Duration::from_secs(1))
             .expect("writer exits after socket write failure");
 
-        assert!(matches!(writer.control.send(vec![b'y']), Err(SendError(_))));
+        assert!(matches!(
+            writer
+                .control
+                .send(frame_server_message(&ServerMessage::ReloadSoundConfig)),
+            Err(SendError(_))
+        ));
         assert!(matches!(
             writer.render.try_send(vec![b'z']),
             Err(TrySendError::Disconnected(_))

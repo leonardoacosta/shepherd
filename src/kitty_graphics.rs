@@ -137,12 +137,34 @@ pub(crate) struct HostGraphicsCache {
 static KITTY_GRAPHICS_ENABLED: AtomicBool = AtomicBool::new(false);
 static LOCAL_HOST_GRAPHICS: OnceLock<Mutex<HostGraphicsCache>> = OnceLock::new();
 
-pub(crate) fn set_enabled(enabled: bool) {
+fn store_enabled(enabled: bool) {
     KITTY_GRAPHICS_ENABLED.store(enabled, Ordering::Release);
+}
+
+pub(crate) fn set_enabled(enabled: bool) {
+    #[cfg(test)]
+    let _guard = test_state_lock();
+    store_enabled(enabled);
 }
 
 pub(crate) fn is_enabled() -> bool {
     KITTY_GRAPHICS_ENABLED.load(Ordering::Acquire)
+}
+
+#[cfg(test)]
+static KITTY_GRAPHICS_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn test_state_lock() -> std::sync::MutexGuard<'static, ()> {
+    KITTY_GRAPHICS_TEST_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+pub(crate) fn set_enabled_under_test_lock(enabled: bool) {
+    store_enabled(enabled);
 }
 
 pub(crate) fn paint_local_pane_graphics(

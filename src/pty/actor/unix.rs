@@ -8,7 +8,7 @@ use std::{
 
 use bytes::Bytes;
 use tokio::sync::mpsc::{self, error::TryRecvError as DataTryRecvError};
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 use crate::pty::fd;
 
@@ -377,7 +377,15 @@ impl PtyIoActor {
         };
         std::thread::Builder::new()
             .name(format!("herdr-pty-{}", config.pane_id))
-            .spawn(move || runner.run())
+            .spawn(move || {
+                let pane_id = runner.pane_id;
+                let result =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| runner.run()));
+                if result.is_err() {
+                    error!(pane = pane_id, "PTY actor panicked");
+                }
+                runner.fire_reader_exit();
+            })
             .map_err(|err| std::io::Error::other(err.to_string()))?;
 
         Ok(handle)
@@ -408,6 +416,12 @@ struct PtyIoActorRunner {
 }
 
 impl PtyIoActorRunner {
+    fn fire_reader_exit(&mut self) {
+        if let Some(on_reader_exit) = self.on_reader_exit.take() {
+            on_reader_exit();
+        }
+    }
+
     fn enqueue_write(&mut self, bytes: Bytes) {
         if !bytes.is_empty() {
             self.pending_writes.push_back(bytes);
@@ -464,9 +478,6 @@ impl PtyIoActorRunner {
             }
         }
 
-        if let Some(on_reader_exit) = self.on_reader_exit.take() {
-            on_reader_exit();
-        }
         debug!(pane = self.pane_id, "PTY actor exiting");
     }
 
@@ -962,6 +973,31 @@ mod tests {
         assert!(received_input[..prefilled].iter().all(|byte| *byte == 0xAA));
         assert_eq!(&received_input[prefilled..], marker.as_ref());
         handle.shutdown();
+    }
+
+    #[test]
+    fn actor_reader_exit_fires_when_on_read_panics() {
+        let (actor_socket, mut peer) = UnixStream::pair().expect("socket pair");
+        peer.set_read_timeout(Some(Duration::from_secs(1)))
+            .expect("peer timeout");
+        let owned = unsafe { OwnedFd::from_raw_fd(actor_socket.into_raw_fd()) };
+        let (exit_tx, exit_rx) = std_mpsc::channel();
+        let config = PtyIoActorConfig {
+            pane_id: 1,
+            master_fd: owned,
+            initially_quiesced: false,
+            on_read: Box::new(|_| panic!("read callback panic")),
+            on_reader_exit: Some(Box::new(move || {
+                exit_tx.send(()).expect("reader exit receiver alive");
+            })),
+        };
+
+        let _handle = PtyIoActor::spawn(config).expect("actor spawn");
+        peer.write_all(b"trigger panic").expect("peer write");
+
+        exit_rx
+            .recv_timeout(Duration::from_millis(500))
+            .expect("reader exit should fire after panic");
     }
 
     #[test]

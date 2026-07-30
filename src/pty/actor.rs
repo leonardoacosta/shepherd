@@ -13,7 +13,7 @@ mod windows {
     use bytes::Bytes;
     use portable_pty::{MasterPty, PtySize};
     use tokio::sync::mpsc;
-    use tracing::{debug, warn};
+    use tracing::{debug, error, warn};
 
     pub(crate) struct PtyReadResult {
         pub terminal_responses: Vec<Bytes>,
@@ -151,23 +151,28 @@ mod windows {
             {
                 let writer = Arc::clone(&writer);
                 std::thread::spawn(move || {
-                    let mut buf = [0u8; 8192];
-                    loop {
-                        match reader.read(&mut buf) {
-                            Ok(0) => break,
-                            Ok(n) => {
-                                let result = on_read(&buf[..n]);
-                                for response in result.terminal_responses {
-                                    if write_all_locked(&writer, &response).is_err() {
-                                        break;
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let mut buf = [0u8; 8192];
+                        loop {
+                            match reader.read(&mut buf) {
+                                Ok(0) => break,
+                                Ok(n) => {
+                                    let result = on_read(&buf[..n]);
+                                    for response in result.terminal_responses {
+                                        if write_all_locked(&writer, &response).is_err() {
+                                            break;
+                                        }
                                     }
                                 }
-                            }
-                            Err(err) => {
-                                debug!(pane_id, err = %err, "windows pty reader failed");
-                                break;
+                                Err(err) => {
+                                    debug!(pane_id, err = %err, "windows pty reader failed");
+                                    break;
+                                }
                             }
                         }
+                    }));
+                    if result.is_err() {
+                        error!(pane_id, "windows pty reader thread panicked");
                     }
                     if let Some(on_reader_exit) = on_reader_exit {
                         on_reader_exit();

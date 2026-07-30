@@ -1,0 +1,14 @@
+{
+  "name": "@herdr/api-client",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate:types": "bun run ./scripts/generate-types.mjs",
+    "generate:types:check": "bun run ./scripts/generate-types.mjs --check",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "json-schema-to-typescript": "^15.0.4",
+    "typescript": "^5.9.2"
+  }
+}

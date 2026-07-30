@@ -77,7 +77,8 @@ pub(crate) use self::{
     },
     sidebar::{
         agent_entry_gap, agent_entry_height_in_body, agent_panel_body_rect, agent_panel_entries,
-        agent_panel_scroll_for_target, agent_panel_scroll_metrics, agent_panel_scrollbar_rect,
+        agent_panel_entries_from, agent_panel_scroll_for_target, agent_panel_scroll_metrics,
+        agent_panel_scroll_metrics_from_entries, agent_panel_scrollbar_rect,
         agent_panel_toggle_rect, all_agent_panel_entries, collapsed_sidebar_sections,
         collapsed_sidebar_toggle_rect, compute_workspace_card_areas, expanded_sidebar_sections,
         expanded_sidebar_toggle_rect, normalized_workspace_scroll, sidebar_section_divider_rect,
@@ -234,17 +235,21 @@ fn compute_view_internal(
         .map(|ws| desktop_tab_bar_and_terminal_area(app, ws, main_area))
         .unwrap_or((Rect::default(), main_area));
 
-    if !app.sidebar_collapsed {
+    let agent_panel_entries = if !app.sidebar_collapsed {
+        let entries = agent_panel_entries_from(app, terminal_runtimes);
         app.workspace_scroll = normalized_workspace_scroll(app, sidebar_area, app.workspace_scroll);
         let (_, detail_area) = expanded_sidebar_sections(sidebar_area, app.sidebar_section_split);
-        let max_agent_scroll = agent_panel_scroll_metrics(app, detail_area).max_offset_from_bottom;
+        let max_agent_scroll = agent_panel_scroll_metrics_from_entries(app, &entries, detail_area)
+            .max_offset_from_bottom;
         app.agent_panel_scroll = app.agent_panel_scroll.min(max_agent_scroll);
+        entries
     } else {
         app.workspace_scroll = app
             .workspace_scroll
             .min(app.workspaces.len().saturating_sub(1));
         app.agent_panel_scroll = 0;
-    }
+        Vec::new()
+    };
 
     let workspace_card_areas = if app.sidebar_collapsed {
         Vec::new()
@@ -298,6 +303,7 @@ fn compute_view_internal(
     app.view = crate::app::ViewState {
         layout: ViewLayout::Desktop,
         sidebar_rect: sidebar_area,
+        agent_panel_entries,
         workspace_card_areas,
         tab_bar_rect,
         tab_hit_areas: tab_bar_view.tab_hit_areas,
@@ -361,6 +367,7 @@ fn compute_mobile_view(
     app.view = crate::app::ViewState {
         layout: ViewLayout::Mobile,
         sidebar_rect: Rect::default(),
+        agent_panel_entries: Vec::new(),
         workspace_card_areas: Vec::new(),
         tab_bar_rect: Rect::default(),
         tab_hit_areas: Vec::new(),

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -169,7 +170,40 @@ def infer_protocol_from_notes(notes: str) -> int | None:
     return int(match.group(1))
 
 
-def normalize_assets(value: Any, label: str) -> dict[str, str]:
+def normalize_asset_entry(value: Any, label: str, *, require_sha256: bool = False) -> dict[str, str]:
+    if isinstance(value, str):
+        url = value.strip()
+        if not url:
+            raise ChangelogError(f"{label} must not be empty")
+        if require_sha256:
+            raise ChangelogError(f"{label} is missing sha256")
+        return {"url": url}
+
+    if not isinstance(value, dict):
+        raise ChangelogError(f"{label} must be a string URL or object")
+
+    url = value.get("url")
+    if not isinstance(url, str) or not url.strip():
+        raise ChangelogError(f"{label} is missing a non-empty url")
+
+    normalized: dict[str, str] = {"url": url.strip()}
+    sha256 = value.get("sha256")
+    if sha256 is not None:
+        if not isinstance(sha256, str) or not sha256.strip():
+            raise ChangelogError(f"{label}.sha256 must be a non-empty string")
+        normalized["sha256"] = sha256.strip()
+    elif require_sha256:
+        raise ChangelogError(f"{label} is missing sha256")
+
+    return normalized
+
+
+def normalize_assets(
+    value: Any,
+    label: str,
+    *,
+    require_sha256: bool = False,
+) -> dict[str, dict[str, str]]:
     if not isinstance(value, dict):
         raise ChangelogError(f"{label} must be an object")
 
@@ -177,12 +211,13 @@ def normalize_assets(value: Any, label: str) -> dict[str, str]:
     if missing_targets:
         raise ChangelogError(f"{label} is missing asset URL for {', '.join(missing_targets)}")
 
-    normalized_assets: dict[str, str] = {}
+    normalized_assets: dict[str, dict[str, str]] = {}
     for target in ASSET_TARGETS:
-        url = value.get(target)
-        if not isinstance(url, str) or not url.strip():
-            raise ChangelogError(f"{label} is missing asset URL for {target}")
-        normalized_assets[target] = url.strip()
+        normalized_assets[target] = normalize_asset_entry(
+            value.get(target),
+            f"{label}.{target}",
+            require_sha256=require_sha256,
+        )
     return normalized_assets
 
 
@@ -212,7 +247,10 @@ def normalize_release_metadata(value: Any, label: str, version: str) -> dict[str
     if "assets" in value:
         metadata["assets"] = normalize_assets(value.get("assets"), f"{label}.assets")
     else:
-        metadata["assets"] = default_release_assets(version)
+        metadata["assets"] = normalize_assets(
+            default_release_assets(version),
+            f"{label}.assets",
+        )
     announcement = normalize_announcement(value.get("announcement"), label)
     if announcement is not None:
         metadata["announcement"] = announcement
@@ -242,10 +280,11 @@ def normalize_releases(value: Any) -> dict[str, dict[str, Any]]:
 def build_latest_json(
     version: str,
     notes: str,
-    assets: dict[str, str],
+    assets: dict[str, Any],
     protocol: int | None = None,
     announcement: dict[str, str] | None = None,
     releases: dict[str, Any] | None = None,
+    asset_hashes: dict[str, str] | None = None,
 ) -> str:
     normalized_version = normalize_version(version)
     normalized_notes = notes.strip()
@@ -256,6 +295,12 @@ def build_latest_json(
         protocol = read_protocol_version()
 
     ordered_assets = normalize_assets(assets, "assets")
+    if asset_hashes is not None:
+        for target in ASSET_TARGETS:
+            sha256 = asset_hashes.get(target)
+            if not isinstance(sha256, str) or not sha256.strip():
+                raise ChangelogError(f"asset_hashes is missing sha256 for {target}")
+            ordered_assets[target]["sha256"] = sha256.strip()
     normalized_announcement = normalize_announcement(announcement, "root")
     archived_releases = normalize_releases(releases)
     current_metadata: dict[str, Any] = {
@@ -291,6 +336,32 @@ def default_release_assets(version: str, repo: str = DEFAULT_RELEASE_REPO) -> di
         target: f"https://github.com/{repo}/releases/download/{tag}/{EXPECTED_ASSET_NAMES[target]}"
         for target in ASSET_TARGETS
     }
+
+
+def compute_asset_sha256s(assets: dict[str, Any], label: str) -> dict[str, str]:
+    normalized_assets = normalize_assets(assets, label)
+    hashes: dict[str, str] = {}
+    for target, asset in normalized_assets.items():
+        result = subprocess.run(
+            [
+                "curl",
+                "-fsSL",
+                "--retry",
+                "3",
+                "--connect-timeout",
+                "10",
+                "--max-time",
+                "120",
+                asset["url"],
+            ],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.decode(errors="replace").strip() or "unknown curl error"
+            raise ChangelogError(f"failed to fetch {label} asset {target}: {stderr}")
+        hashes[target] = hashlib.sha256(result.stdout).hexdigest()
+    return hashes
 
 
 def manifest_from_release_payload(
@@ -430,7 +501,10 @@ def archived_releases_from_current_manifest(manifest: dict[str, Any]) -> dict[st
         if isinstance(assets, dict):
             metadata["assets"] = normalize_assets(assets, "current root assets")
         else:
-            metadata["assets"] = default_release_assets(normalized_version)
+            metadata["assets"] = normalize_assets(
+                default_release_assets(normalized_version),
+                "current root assets",
+            )
         announcement = normalize_announcement(manifest.get("announcement"), "current root")
         if announcement is not None:
             metadata["announcement"] = announcement
@@ -516,9 +590,10 @@ def fetch_remote_json(url: str, label: str) -> dict[str, Any]:
     return payload
 
 
-def verify_asset_urls_resolve(assets: dict[str, str], label: str) -> None:
+def verify_asset_urls_resolve(assets: dict[str, Any], label: str) -> None:
+    normalized_assets = normalize_assets(assets, label)
     for target in ASSET_TARGETS:
-        url = assets[target]
+        url = normalized_assets[target]["url"]
         command = [
             "curl",
             "-fsSIL",
@@ -586,6 +661,7 @@ def cmd_sync_latest_json(args: argparse.Namespace) -> int:
 
     release_payload = fetch_release_payload(version, args.repo)
     new_manifest = manifest_from_release_payload(release_payload, version, args.protocol)
+    asset_hashes = compute_asset_sha256s(dict(new_manifest["assets"]), "release")
     announcement_path = Path(args.announcement)
     announcement = load_product_announcement(announcement_path)
     output = build_latest_json(
@@ -595,6 +671,7 @@ def cmd_sync_latest_json(args: argparse.Namespace) -> int:
         protocol=int(new_manifest["protocol"]),
         announcement=announcement,
         releases=archived_releases_from_current_manifest(current_manifest),
+        asset_hashes=asset_hashes,
     )
     write_text(manifest_path, output)
     if announcement is not None:

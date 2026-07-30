@@ -775,6 +775,7 @@ pub enum ViewLayout {
 pub struct ViewState {
     pub layout: ViewLayout,
     pub sidebar_rect: Rect,
+    pub agent_panel_entries: Vec<crate::ui::AgentPanelEntry>,
     pub workspace_card_areas: Vec<WorkspaceCardArea>,
     pub tab_bar_rect: Rect,
     pub tab_hit_areas: Vec<Rect>,
@@ -787,6 +788,114 @@ pub struct ViewState {
     pub toast_hit_area: Rect,
     pub pane_infos: Vec<PaneInfo>,
     pub split_borders: Vec<SplitBorder>,
+}
+
+#[cfg(test)]
+impl ViewState {
+    fn field_names_for_test() -> &'static [&'static str] {
+        let ViewState {
+            layout: _,
+            sidebar_rect: _,
+            agent_panel_entries: _,
+            workspace_card_areas: _,
+            tab_bar_rect: _,
+            tab_hit_areas: _,
+            tab_scroll_left_hit_area: _,
+            tab_scroll_right_hit_area: _,
+            new_tab_hit_area: _,
+            terminal_area: _,
+            mobile_header_rect: _,
+            mobile_menu_hit_area: _,
+            toast_hit_area: _,
+            pane_infos: _,
+            split_borders: _,
+        } = AppState::test_new().view;
+
+        &[
+            "layout",
+            "sidebar_rect",
+            "agent_panel_entries",
+            "workspace_card_areas",
+            "tab_bar_rect",
+            "tab_hit_areas",
+            "tab_scroll_left_hit_area",
+            "tab_scroll_right_hit_area",
+            "new_tab_hit_area",
+            "terminal_area",
+            "mobile_header_rect",
+            "mobile_menu_hit_area",
+            "toast_hit_area",
+            "pane_infos",
+            "split_borders",
+        ]
+    }
+}
+
+/// Seed landing zone for TUI-only state that should move off `AppState`
+/// during the runtime/client boundary split.
+#[allow(dead_code)] // Staged mirror during the runtime/client split; some fields are not read in every target yet.
+pub struct ClientViewState {
+    pub mode: Mode,
+    pub sidebar_width: u16,
+    pub sidebar_collapsed: bool,
+    pub sidebar_section_split: f32,
+    pub workspace_scroll: usize,
+    pub agent_panel_scroll: usize,
+    pub tab_scroll: usize,
+    pub tab_scroll_follow_active: bool,
+    pub mobile_switcher_scroll: usize,
+    pub mouse_capture: bool,
+    pub copy_on_select: bool,
+    pub view: ViewState,
+}
+
+#[cfg(test)]
+impl ClientViewState {
+    fn field_names_for_test() -> &'static [&'static str] {
+        let seed = AppState::test_new();
+        let ClientViewState {
+            mode: _,
+            sidebar_width: _,
+            sidebar_collapsed: _,
+            sidebar_section_split: _,
+            workspace_scroll: _,
+            agent_panel_scroll: _,
+            tab_scroll: _,
+            tab_scroll_follow_active: _,
+            mobile_switcher_scroll: _,
+            mouse_capture: _,
+            copy_on_select: _,
+            view: _,
+        } = ClientViewState {
+            mode: seed.mode,
+            sidebar_width: seed.sidebar_width,
+            sidebar_collapsed: seed.sidebar_collapsed,
+            sidebar_section_split: seed.sidebar_section_split,
+            workspace_scroll: seed.workspace_scroll,
+            agent_panel_scroll: seed.agent_panel_scroll,
+            tab_scroll: seed.tab_scroll,
+            tab_scroll_follow_active: seed.tab_scroll_follow_active,
+            mobile_switcher_scroll: seed.mobile_switcher_scroll,
+            mouse_capture: seed.mouse_capture,
+            copy_on_select: seed.copy_on_select,
+            view: seed.view,
+        };
+
+        &[
+            "mode",
+            "sidebar_width",
+            "sidebar_collapsed",
+            "sidebar_section_split",
+            "workspace_scroll",
+            "agent_panel_scroll",
+            "tab_scroll",
+            "tab_scroll_follow_active",
+            "mobile_switcher_scroll",
+            "mouse_capture",
+            "copy_on_select",
+            "view",
+        ]
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1769,6 +1878,39 @@ impl AppState {
         }
         ws.active_tab().map(|tab| tab.layout.focused()) == Some(pane_id)
     }
+
+    pub(crate) fn client_view_seed(&self) -> ClientViewState {
+        ClientViewState {
+            mode: self.mode,
+            sidebar_width: self.sidebar_width,
+            sidebar_collapsed: self.sidebar_collapsed,
+            sidebar_section_split: self.sidebar_section_split,
+            workspace_scroll: self.workspace_scroll,
+            agent_panel_scroll: self.agent_panel_scroll,
+            tab_scroll: self.tab_scroll,
+            tab_scroll_follow_active: self.tab_scroll_follow_active,
+            mobile_switcher_scroll: self.mobile_switcher_scroll,
+            mouse_capture: self.mouse_capture,
+            copy_on_select: self.copy_on_select,
+            view: ViewState {
+                layout: self.view.layout,
+                sidebar_rect: self.view.sidebar_rect,
+                agent_panel_entries: self.view.agent_panel_entries.clone(),
+                workspace_card_areas: self.view.workspace_card_areas.clone(),
+                tab_bar_rect: self.view.tab_bar_rect,
+                tab_hit_areas: self.view.tab_hit_areas.clone(),
+                tab_scroll_left_hit_area: self.view.tab_scroll_left_hit_area,
+                tab_scroll_right_hit_area: self.view.tab_scroll_right_hit_area,
+                new_tab_hit_area: self.view.new_tab_hit_area,
+                terminal_area: self.view.terminal_area,
+                mobile_header_rect: self.view.mobile_header_rect,
+                mobile_menu_hit_area: self.view.mobile_menu_hit_area,
+                toast_hit_area: self.view.toast_hit_area,
+                pane_infos: self.view.pane_infos.clone(),
+                split_borders: self.view.split_borders.clone(),
+            },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1841,6 +1983,7 @@ impl AppState {
             view: ViewState {
                 layout: ViewLayout::Desktop,
                 sidebar_rect: Rect::default(),
+                agent_panel_entries: Vec::new(),
                 workspace_card_areas: Vec::new(),
                 tab_bar_rect: Rect::default(),
                 tab_hit_areas: Vec::new(),
@@ -2526,5 +2669,82 @@ mod tests {
                 "Collapse"
             ]
         );
+    }
+
+    #[test]
+    fn view_state_field_set_matches_stage1_freeze() {
+        assert_eq!(
+            ViewState::field_names_for_test(),
+            &[
+                "layout",
+                "sidebar_rect",
+                "agent_panel_entries",
+                "workspace_card_areas",
+                "tab_bar_rect",
+                "tab_hit_areas",
+                "tab_scroll_left_hit_area",
+                "tab_scroll_right_hit_area",
+                "new_tab_hit_area",
+                "terminal_area",
+                "mobile_header_rect",
+                "mobile_menu_hit_area",
+                "toast_hit_area",
+                "pane_infos",
+                "split_borders",
+            ]
+        );
+    }
+
+    #[test]
+    fn client_view_state_stage2_seed_matches_extraction_target() {
+        assert_eq!(
+            ClientViewState::field_names_for_test(),
+            &[
+                "mode",
+                "sidebar_width",
+                "sidebar_collapsed",
+                "sidebar_section_split",
+                "workspace_scroll",
+                "agent_panel_scroll",
+                "tab_scroll",
+                "tab_scroll_follow_active",
+                "mobile_switcher_scroll",
+                "mouse_capture",
+                "copy_on_select",
+                "view",
+            ]
+        );
+    }
+
+    #[test]
+    fn client_view_seed_captures_stage2_fields_from_app_state() {
+        let mut state = AppState::test_new();
+        state.mode = Mode::Navigator;
+        state.sidebar_width = 37;
+        state.sidebar_collapsed = true;
+        state.sidebar_section_split = 0.625;
+        state.workspace_scroll = 3;
+        state.agent_panel_scroll = 5;
+        state.tab_scroll = 7;
+        state.tab_scroll_follow_active = false;
+        state.mobile_switcher_scroll = 9;
+        state.mouse_capture = false;
+        state.copy_on_select = false;
+        state.view.toast_hit_area = Rect::new(1, 2, 3, 4);
+
+        let client_view = state.client_view_seed();
+
+        assert_eq!(client_view.mode, Mode::Navigator);
+        assert_eq!(client_view.sidebar_width, 37);
+        assert!(client_view.sidebar_collapsed);
+        assert_eq!(client_view.sidebar_section_split, 0.625);
+        assert_eq!(client_view.workspace_scroll, 3);
+        assert_eq!(client_view.agent_panel_scroll, 5);
+        assert_eq!(client_view.tab_scroll, 7);
+        assert!(!client_view.tab_scroll_follow_active);
+        assert_eq!(client_view.mobile_switcher_scroll, 9);
+        assert!(!client_view.mouse_capture);
+        assert!(!client_view.copy_on_select);
+        assert_eq!(client_view.view.toast_hit_area, Rect::new(1, 2, 3, 4));
     }
 }

@@ -24,6 +24,8 @@ use std::ptr;
 use std::slice;
 use std::sync::{Mutex, Once, OnceLock};
 
+use tracing::error;
+
 pub use bindings as ffi;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -450,6 +452,7 @@ impl CellWide {
 type WritePtyCallback = dyn FnMut(&[u8]) + Send;
 
 const MAX_CLIPBOARD_BYTES: usize = 192 * 1024;
+const MAX_PNG_PIXELS: usize = 64 * 1024 * 1024;
 
 #[derive(Default)]
 struct TerminalCallbackState {
@@ -484,19 +487,25 @@ unsafe extern "C" fn write_pty_trampoline(
     data: *const u8,
     len: usize,
 ) {
-    if userdata.is_null() || (data.is_null() && len != 0) {
-        return;
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+        if userdata.is_null() || (data.is_null() && len != 0) {
+            return;
+        }
+        let state = &mut *(userdata.cast::<TerminalCallbackState>());
+        let Some(callback) = state.write_pty.as_mut() else {
+            return;
+        };
+        let bytes = if len == 0 {
+            &[]
+        } else {
+            slice::from_raw_parts(data, len)
+        };
+        callback(bytes);
+    }))
+    .is_err()
+    {
+        error!("write_pty_trampoline panicked");
     }
-    let state = unsafe { &mut *(userdata.cast::<TerminalCallbackState>()) };
-    let Some(callback) = state.write_pty.as_mut() else {
-        return;
-    };
-    let bytes = if len == 0 {
-        &[]
-    } else {
-        unsafe { slice::from_raw_parts(data, len) }
-    };
-    callback(bytes);
 }
 
 unsafe extern "C" fn clipboard_write_trampoline(
@@ -583,27 +592,31 @@ unsafe fn borrowed_bytes<'a>(value: ffi::GhosttyString) -> Option<&'a [u8]> {
 }
 
 unsafe extern "C" fn pwd_changed_trampoline(terminal: ffi::GhosttyTerminal, userdata: *mut c_void) {
-    if terminal.is_null() || userdata.is_null() {
-        return;
-    }
-    let mut pwd = ffi::GhosttyString::default();
-    let result = unsafe {
-        ffi::ghostty_terminal_get(
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+        if terminal.is_null() || userdata.is_null() {
+            return;
+        }
+        let mut pwd = ffi::GhosttyString::default();
+        let result = ffi::ghostty_terminal_get(
             terminal,
             ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_PWD,
             (&mut pwd as *mut ffi::GhosttyString).cast(),
-        )
-    };
-    if result != ffi::GhosttyResult_GHOSTTY_SUCCESS || (pwd.ptr.is_null() && pwd.len != 0) {
-        return;
+        );
+        if result != ffi::GhosttyResult_GHOSTTY_SUCCESS || (pwd.ptr.is_null() && pwd.len != 0) {
+            return;
+        }
+        let bytes = if pwd.len == 0 {
+            Vec::new()
+        } else {
+            slice::from_raw_parts(pwd.ptr, pwd.len).to_vec()
+        };
+        let state = &mut *(userdata.cast::<TerminalCallbackState>());
+        state.pwd_changes.push(bytes);
+    }))
+    .is_err()
+    {
+        error!("pwd_changed_trampoline panicked");
     }
-    let bytes = if pwd.len == 0 {
-        Vec::new()
-    } else {
-        unsafe { slice::from_raw_parts(pwd.ptr, pwd.len) }.to_vec()
-    };
-    let state = unsafe { &mut *(userdata.cast::<TerminalCallbackState>()) };
-    state.pwd_changes.push(bytes);
 }
 
 fn install_png_decoder_once() {
@@ -622,18 +635,18 @@ unsafe extern "C" fn decode_png_trampoline(
     data_len: usize,
     out: *mut ffi::GhosttySysImage,
 ) -> bool {
-    if data.is_null() || out.is_null() {
-        return false;
-    }
-    let bytes = unsafe { slice::from_raw_parts(data, data_len) };
-    let Some(rgba) = decode_png_rgba(bytes) else {
-        return false;
-    };
-    let ptr = unsafe { ffi::ghostty_alloc(allocator, rgba.data.len()) };
-    if ptr.is_null() {
-        return false;
-    }
-    unsafe {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+        if data.is_null() || out.is_null() {
+            return false;
+        }
+        let bytes = slice::from_raw_parts(data, data_len);
+        let Some(rgba) = decode_png_rgba(bytes) else {
+            return false;
+        };
+        let ptr = ffi::ghostty_alloc(allocator, rgba.data.len());
+        if ptr.is_null() {
+            return false;
+        }
         ptr::copy_nonoverlapping(rgba.data.as_ptr(), ptr, rgba.data.len());
         *out = ffi::GhosttySysImage {
             width: rgba.width,
@@ -641,8 +654,12 @@ unsafe extern "C" fn decode_png_trampoline(
             data: ptr,
             data_len: rgba.data.len(),
         };
-    }
-    true
+        true
+    }))
+    .unwrap_or_else(|_| {
+        error!("decode_png_trampoline panicked");
+        false
+    })
 }
 
 struct DecodedPng {
@@ -655,6 +672,9 @@ fn decode_png_rgba(bytes: &[u8]) -> Option<DecodedPng> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info().ok()?;
+    if !png_dimensions_within_limit(reader.info().width, reader.info().height) {
+        return None;
+    }
     let mut buf = vec![0; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).ok()?;
     let frame = &buf[..info.buffer_size()];
@@ -693,6 +713,13 @@ fn decode_png_rgba(bytes: &[u8]) -> Option<DecodedPng> {
         height: info.height,
         data,
     })
+}
+
+fn png_dimensions_within_limit(width: u32, height: u32) -> bool {
+    let Some(pixel_count) = (width as usize).checked_mul(height as usize) else {
+        return false;
+    };
+    pixel_count <= MAX_PNG_PIXELS
 }
 
 pub fn unicode_codepoint_width(codepoint: u32) -> u8 {
@@ -3837,6 +3864,42 @@ mod tests {
         }
     }
 
+    fn oversized_png_header(width: u32, height: u32) -> Vec<u8> {
+        const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+
+        fn crc32(bytes: &[u8]) -> u32 {
+            let mut crc = 0xffff_ffffu32;
+            for byte in bytes {
+                crc ^= u32::from(*byte);
+                for _ in 0..8 {
+                    let mask = (crc & 1).wrapping_neg() & 0xedb8_8320;
+                    crc = (crc >> 1) ^ mask;
+                }
+            }
+            !crc
+        }
+
+        fn append_chunk(bytes: &mut Vec<u8>, chunk_type: &[u8; 4], data: &[u8]) {
+            bytes.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            bytes.extend_from_slice(chunk_type);
+            bytes.extend_from_slice(data);
+
+            let mut crc_input = Vec::with_capacity(chunk_type.len() + data.len());
+            crc_input.extend_from_slice(chunk_type);
+            crc_input.extend_from_slice(data);
+            bytes.extend_from_slice(&crc32(&crc_input).to_be_bytes());
+        }
+
+        let mut bytes = Vec::from(&PNG_SIGNATURE[..]);
+        let mut ihdr = Vec::with_capacity(13);
+        ihdr.extend_from_slice(&width.to_be_bytes());
+        ihdr.extend_from_slice(&height.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+        append_chunk(&mut bytes, b"IHDR", &ihdr);
+        append_chunk(&mut bytes, b"IEND", &[]);
+        bytes
+    }
+
     #[test]
     fn clipboard_callback_ignores_clear_and_rejects_unsupported_writes() {
         let mut terminal = Terminal::new(10, 5, 0).unwrap();
@@ -3893,6 +3956,38 @@ mod tests {
 
         terminal.write(b"\x1b]52;c;\x07");
         assert!(terminal.take_clipboard_writes().is_empty());
+    }
+
+    #[test]
+    fn write_pty_trampoline_catches_panicking_callback() {
+        let mut terminal = Terminal::new(10, 5, 0).unwrap();
+        terminal
+            .set_write_pty_callback(|_| panic!("write callback panic"))
+            .unwrap();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+            write_pty_trampoline(
+                terminal.raw,
+                (&mut *terminal.callback_state as *mut TerminalCallbackState).cast(),
+                b"x".as_ptr(),
+                1,
+            );
+        }));
+
+        assert!(
+            result.is_ok(),
+            "write trampoline should catch callback panics"
+        );
+    }
+
+    #[test]
+    fn decode_png_rgba_rejects_oversized_dimensions() {
+        let bytes = oversized_png_header(65_536, 65_536);
+
+        assert!(
+            decode_png_rgba(&bytes).is_none(),
+            "oversized PNG header should be rejected before allocation"
+        );
     }
 
     #[test]

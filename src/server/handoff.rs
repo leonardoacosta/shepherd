@@ -12,6 +12,8 @@ use std::process::{Child, Command};
 use std::time::Duration;
 
 #[cfg(unix)]
+use base64::Engine;
+#[cfg(unix)]
 use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use tracing::{info, warn};
@@ -28,6 +30,8 @@ pub(crate) const MAX_FDS_PER_HANDOFF: usize = 64;
 pub(crate) const MAX_REPLAY_BYTES_PER_PANE: usize = 8 * 1024;
 #[cfg(unix)]
 pub(crate) const COMMIT_TIMEOUT: Duration = READY_TIMEOUT;
+#[cfg(unix)]
+pub(crate) const HANDOFF_TOKEN_ENV_VAR: &str = "HERDR_HANDOFF_TOKEN";
 
 #[cfg(unix)]
 #[derive(Serialize, Deserialize)]
@@ -59,24 +63,13 @@ pub(crate) fn spawn_handoff_import(
     socket_path: &Path,
     token: &str,
 ) -> io::Result<Child> {
-    let fallback_exe;
-    let exe = if let Some(import_exe) = import_exe {
-        import_exe
-    } else {
-        fallback_exe = std::env::current_exe().map_err(|err| {
-            io::Error::new(
-                err.kind(),
-                format!("failed to determine herdr executable path: {err}"),
-            )
-        })?;
-        &fallback_exe
-    };
-    let mut command = Command::new(exe);
+    let exe = validate_import_exe(import_exe)?;
+    let mut command = Command::new(&exe);
     command
         .arg("server")
         .arg("--handoff-import")
         .arg(socket_path)
-        .arg(token)
+        .env(HANDOFF_TOKEN_ENV_VAR, token)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -147,7 +140,7 @@ pub(crate) fn accept_and_validate_on(
     stream.set_read_timeout(Some(READY_TIMEOUT))?;
     stream.set_write_timeout(Some(READY_TIMEOUT))?;
     let token_line = read_line_unbuffered(&mut stream)?;
-    if token_line.trim_end() != token {
+    if !handoff_tokens_equal(token_line.trim_end(), token) {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "handoff import token mismatch",
@@ -378,7 +371,7 @@ fn send_fds(stream: &UnixStream, fds: &[RawFd]) -> io::Result<()> {
     if fds.is_empty() {
         return Ok(());
     }
-    let byte = [b'F'];
+    let byte = b"F";
     let iov = [libc::iovec {
         iov_base: byte.as_ptr() as *mut libc::c_void,
         iov_len: byte.len(),
@@ -463,4 +456,209 @@ fn recv_fds(stream: &UnixStream, expected: usize) -> io::Result<Vec<RawFd>> {
 #[cfg(unix)]
 pub(crate) fn log_import_result(panes: usize) {
     info!(panes, "handoff import ready");
+}
+
+#[cfg(unix)]
+pub(crate) fn generate_token() -> io::Result<String> {
+    let mut bytes = [0u8; 16];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
+}
+
+#[cfg(unix)]
+pub(crate) fn validate_import_exe(import_exe: Option<&Path>) -> io::Result<PathBuf> {
+    let exe = match import_exe {
+        Some(path) => path.to_path_buf(),
+        None => std::env::current_exe().map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("failed to determine herdr executable path: {err}"),
+            )
+        })?,
+    };
+    if !exe.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "handoff import executable must be an absolute path: {}",
+                exe.display()
+            ),
+        ));
+    }
+
+    let metadata = std::fs::symlink_metadata(&exe).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!(
+                "failed to inspect handoff import executable {}: {err}",
+                exe.display()
+            ),
+        )
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "handoff import executable must not be a symlink: {}",
+                exe.display()
+            ),
+        ));
+    }
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "handoff import executable must be a regular file: {}",
+                exe.display()
+            ),
+        ));
+    }
+
+    let current_exe = std::env::current_exe().map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!("failed to determine current herdr executable path: {err}"),
+        )
+    })?;
+    let exe_dir = exe.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "handoff import executable has no parent directory: {}",
+                exe.display()
+            ),
+        )
+    })?;
+    let current_dir = current_exe.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "current herdr executable has no parent directory: {}",
+                current_exe.display()
+            ),
+        )
+    })?;
+    let exe_dir = std::fs::canonicalize(exe_dir).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!(
+                "failed to canonicalize handoff import directory {}: {err}",
+                exe_dir.display()
+            ),
+        )
+    })?;
+    let current_dir = std::fs::canonicalize(current_dir).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!(
+                "failed to canonicalize current herdr directory {}: {err}",
+                current_dir.display()
+            ),
+        )
+    })?;
+    if exe_dir != current_dir {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "handoff import executable must live in the same directory as the current herdr binary: {}",
+                exe.display()
+            ),
+        ));
+    }
+
+    Ok(exe)
+}
+
+#[cfg(unix)]
+fn handoff_tokens_equal(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    let mut diff = left.len() ^ right.len();
+    for idx in 0..left.len().max(right.len()) {
+        let lhs = left.get(idx).copied().unwrap_or_default();
+        let rhs = right.get(idx).copied().unwrap_or_default();
+        diff |= usize::from(lhs ^ rhs);
+    }
+    diff == 0
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn unique_temp_path(label: &str) -> PathBuf {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("herdr-handoff-{label}-{}-{n}", std::process::id()))
+    }
+
+    #[test]
+    fn validate_import_exe_rejects_path_outside_current_exe_dir() {
+        let path = unique_temp_path("outside");
+        fs::write(&path, "#!/bin/sh\nsleep 1\n").unwrap();
+        let metadata = fs::metadata(&path).unwrap();
+        let mut permissions = metadata.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions).unwrap();
+
+        let err = validate_import_exe(Some(path.as_path())).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+        assert!(err.to_string().contains("same directory"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn validate_import_exe_accepts_current_exe() {
+        let current_exe = std::env::current_exe().unwrap();
+        let validated = validate_import_exe(Some(current_exe.as_path())).unwrap();
+        assert_eq!(validated, current_exe);
+    }
+
+    #[test]
+    fn generate_token_produces_fixed_length_secret() {
+        let token = generate_token().unwrap();
+        assert_eq!(token.len(), 22);
+        assert!(token
+            .bytes()
+            .all(|byte| { byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_' }));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn spawn_handoff_import_does_not_put_token_in_argv() {
+        let current_exe = std::env::current_exe().unwrap();
+        let script_path = current_exe.parent().unwrap().join(format!(
+            "herdr-handoff-import-argv-{}-{}.sh",
+            std::process::id(),
+            unique_temp_path("script")
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+        ));
+        fs::write(&script_path, "#!/bin/sh\nsleep 5\n").unwrap();
+        let metadata = fs::metadata(&script_path).unwrap();
+        let mut permissions = metadata.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script_path, permissions).unwrap();
+
+        let token = "secret-handoff-token";
+        let socket_path = unique_temp_path("socket");
+        let mut child =
+            spawn_handoff_import(Some(script_path.as_path()), socket_path.as_path(), token)
+                .unwrap();
+
+        let cmdline_path = PathBuf::from(format!("/proc/{}/cmdline", child.id()));
+        let cmdline = fs::read(cmdline_path).unwrap();
+        let rendered = String::from_utf8_lossy(&cmdline);
+        assert!(!rendered.contains(token));
+
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = fs::remove_file(script_path);
+    }
 }

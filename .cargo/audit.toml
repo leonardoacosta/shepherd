@@ -1,0 +1,9 @@
+[advisories]
+severity_threshold = "high"
+ignore = []
+informational_warnings = ["unmaintained"]
+
+[output]
+format = "terminal"
+quiet = false
+show_tree = true

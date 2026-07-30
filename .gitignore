@@ -1,5 +1,11 @@
 /target
 /vendor/libghostty-vt/zig-pkg/
+node_modules/
+coverage/
+*.tsbuildinfo
+.eslintcache
+.npm/
+.pnpm-store/
 __pycache__/
 *.pyc
 *.swp

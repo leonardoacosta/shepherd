@@ -18,6 +18,15 @@ pub(crate) fn toast_notify_kind(delivery: config::ToastDelivery) -> Option<proto
     }
 }
 
+pub(crate) fn client_notification_from_title_and_context(
+    delivery: config::ToastDelivery,
+    title: impl Into<String>,
+    context: Option<String>,
+) -> Option<(protocol::NotifyKind, String, Option<String>)> {
+    let kind = toast_notify_kind(delivery)?;
+    Some((kind, title.into(), context))
+}
+
 pub(crate) fn toast_message_from_state_change(
     state: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
@@ -54,6 +63,43 @@ pub(crate) fn toast_message_from_state_change(
                 ))
             })
         })
+}
+
+pub(crate) fn client_notification_from_state_change(
+    delivery: config::ToastDelivery,
+    state: &AppState,
+    terminal_runtimes: &TerminalRuntimeRegistry,
+    pane_id: PaneId,
+    suppress_active_tab_notifications: bool,
+    prev_state: AgentState,
+    new_state: AgentState,
+    agent_label: Option<&str>,
+) -> Option<(protocol::NotifyKind, String, Option<String>)> {
+    let kind = toast_notify_kind(delivery)?;
+    let message = toast_message_from_state_change(
+        state,
+        terminal_runtimes,
+        pane_id,
+        suppress_active_tab_notifications,
+        prev_state,
+        new_state,
+        agent_label,
+    )?;
+    let (title, body) = crate::terminal_notify::split_message(&message);
+    Some((kind, title.to_string(), body.map(str::to_string)))
+}
+
+pub(crate) fn client_notification_for_update_ready(
+    delivery: config::ToastDelivery,
+    version: &str,
+    install_command: &str,
+) -> Option<(protocol::NotifyKind, String, Option<String>)> {
+    let kind = toast_notify_kind(delivery)?;
+    Some((
+        kind,
+        format!("v{version} available"),
+        Some(crate::update::update_install_instruction(install_command)),
+    ))
 }
 
 fn toast_event_text(kind: app::state::ToastKind) -> &'static str {

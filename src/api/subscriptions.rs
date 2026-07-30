@@ -1,9 +1,11 @@
+use std::collections::VecDeque;
+
 use regex::Regex;
 
 use crate::api::schema::{
-    ErrorBody, ErrorResponse, Method, PaneAgentStatusChangedEvent, PaneOutputMatchedEvent,
-    PaneScrollChangedEvent, PaneScrollInfo, Request, Subscription, SubscriptionEventData,
-    SubscriptionEventEnvelope, SubscriptionEventKind,
+    ErrorBody, ErrorResponse, Method, PaneAgentStatusChangedEvent, PaneOutputEvent,
+    PaneOutputMatchedEvent, PaneReadResult, PaneScrollChangedEvent, PaneScrollInfo, Request,
+    Subscription, SubscriptionEventData, SubscriptionEventEnvelope, SubscriptionEventKind,
 };
 use crate::api::server::{dispatch_to_app_with_timeout, APP_RESPONSE_TIMEOUT};
 use crate::api::{ApiRequestSender, EventHub};
@@ -43,6 +45,20 @@ pub(super) struct ActiveOutputMatchedSubscription {
     regex: Option<Regex>,
     strip_ansi: bool,
     currently_matching: bool,
+    request_prefix: String,
+}
+
+pub(super) struct ActivePaneOutputSubscription {
+    pane_id: String,
+    source: crate::api::schema::ReadSource,
+    format: crate::api::schema::ReadFormat,
+    lines: Option<u32>,
+    strip_ansi: bool,
+    last_revision: u64,
+    last_text: String,
+    last_truncated: bool,
+    pending: VecDeque<SubscriptionEventEnvelope>,
+    initial_snapshot: Option<PaneReadResult>,
     request_prefix: String,
 }
 
@@ -98,10 +114,13 @@ pub(super) struct ActiveEventSubscription {
 
 pub(super) enum ActiveSubscription {
     Event(ActiveEventSubscription),
+    PaneOutput(ActivePaneOutputSubscription),
     OutputMatched(ActiveOutputMatchedSubscription),
     AgentStatusChanged(Box<ActiveAgentStatusChangedSubscription>),
     ScrollChanged(ActiveScrollChangedSubscription),
 }
+
+const PANE_OUTPUT_PENDING_MAX_EVENTS: usize = 8;
 
 impl ActiveSubscription {
     pub(super) fn new(
@@ -236,6 +255,7 @@ impl ActiveSubscription {
                     &pane_id,
                     source,
                     lines,
+                    crate::api::schema::ReadFormat::Text,
                     strip_ansi,
                     api_tx,
                 );
@@ -249,6 +269,37 @@ impl ActiveSubscription {
                     regex,
                     strip_ansi,
                     currently_matching: false,
+                    request_prefix: format!("{request_id}:sub:{index}"),
+                }))
+            }
+            Subscription::PaneOutput {
+                pane_id,
+                source,
+                format,
+                initial_tail_lines,
+                strip_ansi,
+            } => {
+                let probe = pane_read(
+                    format!("{request_id}:sub:{index}:probe"),
+                    &pane_id,
+                    source,
+                    initial_tail_lines,
+                    format,
+                    strip_ansi,
+                    api_tx,
+                )?;
+
+                Ok(Self::PaneOutput(ActivePaneOutputSubscription {
+                    pane_id,
+                    source,
+                    format,
+                    lines: initial_tail_lines,
+                    strip_ansi,
+                    last_revision: probe.revision,
+                    last_text: probe.text.clone(),
+                    last_truncated: probe.truncated,
+                    pending: VecDeque::new(),
+                    initial_snapshot: Some(probe),
                     request_prefix: format!("{request_id}:sub:{index}"),
                 }))
             }
@@ -303,6 +354,7 @@ impl ActiveSubscription {
     ) -> Option<serde_json::Value> {
         match self {
             Self::Event(subscription) => subscription.poll(event_hub),
+            Self::PaneOutput(subscription) => serde_json::to_value(subscription.poll(api_tx)?).ok(),
             Self::OutputMatched(subscription) => {
                 serde_json::to_value(subscription.poll(api_tx)?).ok()
             }
@@ -312,6 +364,15 @@ impl ActiveSubscription {
             Self::ScrollChanged(subscription) => {
                 serde_json::to_value(subscription.poll(api_tx)?).ok()
             }
+        }
+    }
+
+    pub(super) fn startup_event(&mut self) -> Option<serde_json::Value> {
+        match self {
+            Self::PaneOutput(subscription) => {
+                serde_json::to_value(subscription.take_initial_event()?).ok()
+            }
+            _ => None,
         }
     }
 
@@ -348,6 +409,7 @@ impl ActiveOutputMatchedSubscription {
             &self.pane_id,
             output_match_read_source(&self.source),
             self.lines,
+            crate::api::schema::ReadFormat::Text,
             self.strip_ansi,
             api_tx,
         )
@@ -374,6 +436,98 @@ impl ActiveOutputMatchedSubscription {
                 None
             }
         }
+    }
+}
+
+impl ActivePaneOutputSubscription {
+    fn take_initial_event(&mut self) -> Option<SubscriptionEventEnvelope> {
+        if let Some(event) = self.pending.pop_front() {
+            return Some(event);
+        }
+
+        let initial = self.initial_snapshot.take()?;
+        self.enqueue_snapshot(initial, true);
+        self.pending.pop_front()
+    }
+
+    fn poll(&mut self, api_tx: &ApiRequestSender) -> Option<SubscriptionEventEnvelope> {
+        if let Some(event) = self.pending.pop_front() {
+            return Some(event);
+        }
+
+        let _ = self.initial_snapshot.take();
+
+        let read = pane_read(
+            format!("{}:read", self.request_prefix),
+            &self.pane_id,
+            self.source,
+            self.lines,
+            self.format,
+            self.strip_ansi,
+            api_tx,
+        )
+        .ok()?;
+
+        if read.revision == self.last_revision {
+            return None;
+        }
+
+        self.enqueue_snapshot(read, false);
+        self.pending.pop_front()
+    }
+
+    fn enqueue_snapshot(&mut self, read: PaneReadResult, initial: bool) {
+        let gap_override = self.pending.len() >= PANE_OUTPUT_PENDING_MAX_EVENTS;
+        if gap_override {
+            self.pending.clear();
+        }
+
+        if let Some(event) = self.build_event(&read, initial, gap_override) {
+            self.pending.push_back(event);
+        }
+
+        self.last_revision = read.revision;
+        self.last_text = read.text;
+        self.last_truncated = read.truncated;
+    }
+
+    fn build_event(
+        &self,
+        read: &PaneReadResult,
+        initial: bool,
+        gap_override: bool,
+    ) -> Option<SubscriptionEventEnvelope> {
+        let (chunk, gap) = if initial {
+            (read.text.clone(), false)
+        } else if read.text == self.last_text && read.truncated == self.last_truncated {
+            return None;
+        } else if !gap_override
+            && !self.last_truncated
+            && !self.last_text.is_empty()
+            && read.text.starts_with(&self.last_text)
+        {
+            (read.text[self.last_text.len()..].to_string(), false)
+        } else {
+            (read.text.clone(), true)
+        };
+
+        if chunk.is_empty() && !(initial || gap || gap_override) {
+            return None;
+        }
+
+        Some(SubscriptionEventEnvelope {
+            event: SubscriptionEventKind::PaneOutput,
+            data: SubscriptionEventData::PaneOutput(PaneOutputEvent {
+                pane_id: read.pane_id.clone(),
+                source: self.source,
+                format: self.format,
+                revision: read.revision,
+                chunk,
+                truncated: read.truncated,
+                gap: gap || gap_override,
+                initial,
+            }),
+        })
     }
 }
 
@@ -545,6 +699,7 @@ fn pane_read(
     pane_id: &str,
     source: crate::api::schema::ReadSource,
     lines: Option<u32>,
+    format: crate::api::schema::ReadFormat,
     strip_ansi: bool,
     api_tx: &ApiRequestSender,
 ) -> Result<crate::api::schema::PaneReadResult, ErrorResponse> {
@@ -555,7 +710,7 @@ fn pane_read(
                 pane_id: pane_id.to_string(),
                 source,
                 lines,
-                format: crate::api::schema::ReadFormat::Text,
+                format,
                 strip_ansi,
             }),
         },
@@ -678,7 +833,8 @@ mod tests {
     #[test]
     fn workspace_metadata_subscription_uses_dedicated_event_kind() {
         let event_hub = EventHub::default();
-        let (api_tx, _api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (api_tx, _api_rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::api::ApiRequestMessage>();
         let subscription = ActiveSubscription::new(
             Subscription::WorkspaceMetadataUpdated {},
             "test",
@@ -848,5 +1004,43 @@ mod tests {
         };
         assert_eq!(data.title.as_deref(), Some("short lived"));
         assert!(subscription.initial_event.is_none());
+    }
+
+    #[test]
+    fn pane_output_subscription_emits_initial_snapshot() {
+        let (_api_tx, _api_rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::api::ApiRequestMessage>();
+        let mut subscription = ActivePaneOutputSubscription {
+            pane_id: "pane_1".into(),
+            source: crate::api::schema::ReadSource::Recent,
+            format: crate::api::schema::ReadFormat::Text,
+            lines: Some(40),
+            strip_ansi: true,
+            last_revision: 2,
+            last_text: "before-sub\n".into(),
+            last_truncated: false,
+            pending: VecDeque::new(),
+            initial_snapshot: Some(crate::api::schema::PaneReadResult {
+                pane_id: "pane_1".into(),
+                tab_id: "tab_1".into(),
+                workspace_id: "workspace_1".into(),
+                source: crate::api::schema::ReadSource::Recent,
+                format: crate::api::schema::ReadFormat::Text,
+                text: "before-sub\n".into(),
+                revision: 2,
+                truncated: false,
+            }),
+            request_prefix: "test".into(),
+        };
+
+        let event = subscription
+            .take_initial_event()
+            .expect("initial pane output event");
+        let SubscriptionEventData::PaneOutput(data) = event.data else {
+            panic!("wrong pane output event data");
+        };
+        assert!(data.initial);
+        assert_eq!(data.chunk, "before-sub\n");
+        assert!(!data.gap);
     }
 }

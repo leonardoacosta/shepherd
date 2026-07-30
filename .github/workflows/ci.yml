@@ -41,6 +41,65 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: python3 scripts/conventional_commits.py "$PR_TITLE"
 
+  maintenance:
+    if: github.event_name != 'push' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@1a2efb60207ab464b4e16754f2a9d9f6c070a7b7 # v5.4.0
+        with:
+          python-version: "3.13"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+        with:
+          tool: cargo-audit
+
+      - name: Run maintenance unit tests
+        run: |
+          python3 -m unittest \
+            scripts.test_agent_detection_manifest_check \
+            scripts.test_changelog \
+            scripts.test_config_reference_check \
+            scripts.test_docs_translation_parity \
+            scripts.test_hermes_integration_asset \
+            scripts.test_package_windows_conpty \
+            scripts.test_preview \
+            scripts.test_socket_api_reference_check \
+            scripts.test_vendor_libghostty_vt \
+            scripts.test_vendor_portable_pty \
+            scripts.test_vendor_upstream_drift
+
+      - name: Run cargo audit
+        run: cargo audit
+
+      - name: Check config reference docs
+        run: python3 scripts/config_reference_check.py
+
+      - name: Check socket API docs
+        run: python3 scripts/socket_api_reference_check.py
+
+      - name: Check agent detection manifests
+        run: python3 scripts/agent_detection_manifest_check.py
+
+      - name: Check next docs translation parity
+        run: python3 scripts/docs_translation_parity.py --docs-root docs/next/website/src/content/docs
+
+      - name: Check stable docs translation parity
+        run: python3 scripts/docs_translation_parity.py --docs-root website/src/content/docs
+
   check:
     name: check (${{ matrix.os }})
     strategy:

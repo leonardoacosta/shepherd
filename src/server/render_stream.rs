@@ -6,13 +6,20 @@ use ratatui::layout::{Position, Rect, Size};
 use crate::app::state::AppState;
 use crate::app::Mode;
 use crate::protocol::render_ansi::{BlitEncoder, EncodedBlit};
-use crate::protocol::{CursorState, FrameData, RenderEncoding, ServerMessage, TerminalFrame};
+use crate::protocol::{
+    frame_cell_runs, CursorState, FrameData, RenderEncoding, ServerMessage, TerminalFrame,
+};
 use crate::terminal::TerminalRuntimeRegistry;
 
 /// Per-client render baseline for the negotiated render encoding.
 pub(crate) enum ClientRenderState {
     /// Semantic clients compare full frame data and skip identical frames.
     Semantic { last_frame: Option<FrameData> },
+    /// Semantic delta clients keep the last full frame plus a sequence counter.
+    SemanticDelta {
+        last_frame: Option<FrameData>,
+        seq: u64,
+    },
     /// Terminal-ANSI clients keep a terminal diff encoder and sequence number.
     TerminalAnsi {
         blit_encoder: BlitEncoder,
@@ -25,6 +32,10 @@ impl ClientRenderState {
     pub(crate) fn new(render_encoding: RenderEncoding) -> Self {
         match render_encoding {
             RenderEncoding::SemanticFrame => Self::Semantic { last_frame: None },
+            RenderEncoding::SemanticDeltaFrame => Self::SemanticDelta {
+                last_frame: None,
+                seq: 0,
+            },
             RenderEncoding::TerminalAnsi => Self::TerminalAnsi {
                 blit_encoder: BlitEncoder::new(),
                 seq: 0,
@@ -36,6 +47,10 @@ impl ClientRenderState {
     pub(crate) fn reset_baseline(&mut self) {
         match self {
             Self::Semantic { last_frame } => *last_frame = None,
+            Self::SemanticDelta { last_frame, seq } => {
+                *last_frame = None;
+                *seq = 0;
+            }
             Self::TerminalAnsi {
                 blit_encoder,
                 repaint_pending,
@@ -50,6 +65,10 @@ impl ClientRenderState {
     pub(crate) fn request_repaint(&mut self) {
         match self {
             Self::Semantic { last_frame } => *last_frame = None,
+            Self::SemanticDelta { last_frame, seq } => {
+                *last_frame = None;
+                *seq = 0;
+            }
             Self::TerminalAnsi {
                 repaint_pending, ..
             } => *repaint_pending = true,
@@ -57,8 +76,13 @@ impl ClientRenderState {
     }
 
     pub(crate) fn reset_semantic_input_baseline(&mut self) {
-        if let Self::Semantic { last_frame } = self {
-            *last_frame = None;
+        match self {
+            Self::Semantic { last_frame } => *last_frame = None,
+            Self::SemanticDelta { last_frame, seq } => {
+                *last_frame = None;
+                *seq = 0;
+            }
+            Self::TerminalAnsi { .. } => {}
         }
     }
 
@@ -72,6 +96,33 @@ impl ClientRenderState {
                 crate::render_prof::event("prepare_frame.semantic.changed");
                 Some(PreparedRender::Semantic {
                     message: ServerMessage::Frame(frame),
+                    frame: None,
+                })
+            }
+            Self::SemanticDelta { last_frame, seq } => {
+                if last_frame.as_ref() == Some(&frame) {
+                    crate::render_prof::event("prepare_frame.semantic.skip_current");
+                    return None;
+                }
+                crate::render_prof::event("prepare_frame.semantic.changed");
+                let message = if let Some(previous) = last_frame.as_ref() {
+                    if previous.width == frame.width && previous.height == frame.height {
+                        ServerMessage::FrameDelta {
+                            seq: seq.saturating_add(1),
+                            base_seq: *seq,
+                            cell_runs: frame_cell_runs(previous, &frame),
+                            cursor: frame.cursor.clone(),
+                            graphics: frame.graphics.clone(),
+                        }
+                    } else {
+                        ServerMessage::Frame(frame.clone())
+                    }
+                } else {
+                    ServerMessage::Frame(frame.clone())
+                };
+                Some(PreparedRender::Semantic {
+                    message,
+                    frame: Some(frame),
                 })
             }
             Self::TerminalAnsi {
@@ -114,6 +165,7 @@ impl ClientRenderState {
     pub(crate) fn last_frame(&self) -> Option<&FrameData> {
         match self {
             Self::Semantic { last_frame } => last_frame.as_ref(),
+            Self::SemanticDelta { last_frame, .. } => last_frame.as_ref(),
             Self::TerminalAnsi { blit_encoder, .. } => blit_encoder.last_frame(),
         }
     }
@@ -124,8 +176,23 @@ impl ClientRenderState {
                 Self::Semantic { last_frame },
                 PreparedRender::Semantic {
                     message: ServerMessage::Frame(frame),
+                    frame: _,
                 },
             ) => *last_frame = Some(frame),
+            (
+                Self::SemanticDelta { last_frame, seq },
+                PreparedRender::Semantic {
+                    message,
+                    frame: Some(frame),
+                },
+            ) => {
+                *last_frame = Some(frame);
+                match message {
+                    ServerMessage::Frame(_) => *seq = 0,
+                    ServerMessage::FrameDelta { seq: sent_seq, .. } => *seq = sent_seq,
+                    _ => {}
+                }
+            }
             (
                 Self::TerminalAnsi {
                     blit_encoder,
@@ -150,6 +217,7 @@ impl ClientRenderState {
     pub(crate) fn terminal_seq(&self) -> Option<u64> {
         match self {
             Self::Semantic { .. } => None,
+            Self::SemanticDelta { .. } => None,
             Self::TerminalAnsi { seq, .. } => Some(*seq),
         }
     }
@@ -171,6 +239,7 @@ fn insert_graphics_before_sync_end(encoded: &mut Vec<u8>, graphics: &[u8]) {
 pub(crate) enum PreparedRender {
     Semantic {
         message: ServerMessage,
+        frame: Option<FrameData>,
     },
     TerminalAnsi {
         message: ServerMessage,
@@ -182,7 +251,7 @@ pub(crate) enum PreparedRender {
 impl PreparedRender {
     pub(crate) fn message(&self) -> &ServerMessage {
         match self {
-            Self::Semantic { message } | Self::TerminalAnsi { message, .. } => message,
+            Self::Semantic { message, .. } | Self::TerminalAnsi { message, .. } => message,
         }
     }
 
@@ -190,6 +259,10 @@ impl PreparedRender {
         match self {
             Self::Semantic {
                 message: ServerMessage::Frame(frame),
+                frame: _,
+            } => Some(frame),
+            Self::Semantic {
+                frame: Some(frame), ..
             } => Some(frame),
             Self::TerminalAnsi { frame, .. } => Some(frame),
             _ => None,
@@ -466,4 +539,197 @@ fn focused_terminal_suppresses_host_cursor(
     app_state
         .runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, info.id)
         .is_some_and(crate::terminal::TerminalRuntime::synchronized_output_active)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::Engine as _;
+    use ratatui::layout::Rect;
+    use serde::Deserialize;
+    use std::path::{Path, PathBuf};
+
+    #[derive(Debug, Deserialize)]
+    struct CursorFixture {
+        x: u16,
+        y: u16,
+        visible: bool,
+        shape: u8,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct RenderFixture {
+        terminal_cols: u16,
+        terminal_rows: u16,
+        render_width: u16,
+        render_height: u16,
+        pre_render_width: Option<u16>,
+        pre_render_height: Option<u16>,
+        input_b64: String,
+        expected_rows: Vec<Vec<String>>,
+        cursor: Option<CursorFixture>,
+    }
+
+    fn fixture_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("render")
+    }
+
+    fn load_fixture(path: &Path) -> RenderFixture {
+        toml::from_str(&std::fs::read_to_string(path).expect("fixture text")).expect("fixture toml")
+    }
+
+    fn render_rows(
+        runtime: &crate::terminal::TerminalRuntime,
+        area: Rect,
+    ) -> (Vec<Vec<String>>, Option<CursorState>) {
+        let (buffer, cursor) = render_terminal_virtual(runtime, area);
+        let mut rows = Vec::with_capacity(area.height as usize);
+        for y in 0..area.height {
+            let mut row = Vec::with_capacity(area.width as usize);
+            for x in 0..area.width {
+                row.push(buffer.cell((x, y)).unwrap().symbol().to_string());
+            }
+            rows.push(row);
+        }
+        (rows, cursor)
+    }
+
+    #[test]
+    fn render_terminal_golden_fixtures_match_expected_rows_and_cursor() {
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            let mut fixture_paths = std::fs::read_dir(fixture_dir())
+                .expect("fixture dir")
+                .map(|entry| entry.expect("dir entry").path())
+                .collect::<Vec<_>>();
+            fixture_paths.sort();
+            assert!(
+                fixture_paths.len() >= 5,
+                "expected at least five render fixtures"
+            );
+
+            for path in fixture_paths {
+                let fixture = load_fixture(&path);
+                let input = base64::engine::general_purpose::STANDARD
+                    .decode(fixture.input_b64.as_bytes())
+                    .expect("fixture input");
+                let runtime = crate::terminal::TerminalRuntime::test_with_screen_bytes(
+                    fixture.terminal_cols,
+                    fixture.terminal_rows,
+                    &input,
+                );
+                if let (Some(width), Some(height)) =
+                    (fixture.pre_render_width, fixture.pre_render_height)
+                {
+                    let _ = render_terminal_virtual(&runtime, Rect::new(0, 0, width, height));
+                }
+                let area = Rect::new(0, 0, fixture.render_width, fixture.render_height);
+                let (rows, cursor) = render_rows(&runtime, area);
+                assert_eq!(
+                    rows,
+                    fixture.expected_rows,
+                    "rows mismatch for {}",
+                    path.display()
+                );
+                let expected_cursor = fixture.cursor.map(|cursor| CursorState {
+                    x: cursor.x,
+                    y: cursor.y,
+                    visible: cursor.visible,
+                    shape: cursor.shape,
+                });
+                assert_eq!(
+                    cursor,
+                    expected_cursor,
+                    "cursor mismatch for {}",
+                    path.display()
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn render_delta_reconstruction_matches_whole_frame_goldens() {
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            let mut fixture_paths = std::fs::read_dir(fixture_dir())
+                .expect("fixture dir")
+                .map(|entry| entry.expect("dir entry").path())
+                .collect::<Vec<_>>();
+            fixture_paths.sort();
+
+            let mut render_state = ClientRenderState::new(RenderEncoding::SemanticDeltaFrame);
+            let mut reconstructed: Option<crate::protocol::FrameData> = None;
+            let mut last_seq = 0u64;
+
+            for path in fixture_paths {
+                let fixture = load_fixture(&path);
+                let input = base64::engine::general_purpose::STANDARD
+                    .decode(fixture.input_b64.as_bytes())
+                    .expect("fixture input");
+                let runtime = crate::terminal::TerminalRuntime::test_with_screen_bytes(
+                    fixture.terminal_cols,
+                    fixture.terminal_rows,
+                    &input,
+                );
+                if let (Some(width), Some(height)) =
+                    (fixture.pre_render_width, fixture.pre_render_height)
+                {
+                    let _ = render_terminal_virtual(&runtime, Rect::new(0, 0, width, height));
+                }
+
+                let area = Rect::new(0, 0, fixture.render_width, fixture.render_height);
+                let (buffer, cursor) = render_terminal_virtual(&runtime, area);
+                let expected = crate::protocol::FrameData::from_ratatui_buffer_with_hyperlinks(
+                    &buffer,
+                    cursor,
+                    &[],
+                );
+
+                let prepared = render_state
+                    .prepare_frame(expected.clone())
+                    .expect("first changed frame");
+                match prepared.message() {
+                    crate::protocol::ServerMessage::Frame(frame) => {
+                        reconstructed = Some(frame.clone());
+                        last_seq = 0;
+                    }
+                    crate::protocol::ServerMessage::FrameDelta {
+                        seq,
+                        base_seq,
+                        cell_runs,
+                        cursor,
+                        graphics,
+                    } => {
+                        let current = reconstructed
+                            .take()
+                            .expect("delta should have a keyframe base");
+                        assert_eq!(
+                            *base_seq,
+                            last_seq,
+                            "base seq mismatch for {}",
+                            path.display()
+                        );
+                        reconstructed = Some(crate::protocol::apply_frame_delta(
+                            current,
+                            cell_runs,
+                            cursor.clone(),
+                            graphics.clone(),
+                        ));
+                        last_seq = *seq;
+                    }
+                    other => panic!("unexpected prepared semantic message: {other:?}"),
+                }
+                assert_eq!(
+                    reconstructed.as_ref(),
+                    Some(&expected),
+                    "delta reconstruction mismatch for {}",
+                    path.display()
+                );
+                render_state.commit_sent_frame(prepared);
+            }
+        });
+    }
 }

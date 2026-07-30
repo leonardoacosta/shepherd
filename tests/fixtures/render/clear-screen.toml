@@ -1,0 +1,17 @@
+terminal_cols = 10
+terminal_rows = 3
+render_width = 10
+render_height = 3
+input_b64 = "bGluZTENCmxpbmUyG1syShtbSGRvbmU="
+
+expected_rows = [
+  ["d", "o", "n", "e", " ", " ", " ", " ", " ", " "],
+  [" ", " ", " ", " ", " ", " ", " ", " ", " ", " "],
+  [" ", " ", " ", " ", " ", " ", " ", " ", " ", " "],
+]
+
+[cursor]
+x = 4
+y = 0
+visible = true
+shape = 0

@@ -1,0 +1,16 @@
+terminal_cols = 6
+terminal_rows = 2
+render_width = 6
+render_height = 2
+input_b64 = "QeeVjGXMgfCfmYI="
+
+expected_rows = [
+  ["A", "界", " ", "é", "🙂", " "],
+  [" ", " ", " ", " ", " ", " "],
+]
+
+[cursor]
+x = 5
+y = 0
+visible = true
+shape = 0

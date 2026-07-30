@@ -24,6 +24,16 @@ from scripts.changelog import (
 )
 
 
+def asset_objects(urls: dict[str, str], *, sha256: dict[str, str] | None = None) -> dict[str, dict[str, str]]:
+    result: dict[str, dict[str, str]] = {}
+    for target, url in urls.items():
+        entry = {"url": url}
+        if sha256 and target in sha256:
+            entry["sha256"] = sha256[target]
+        result[target] = entry
+    return result
+
+
 class ChangelogScriptTests(unittest.TestCase):
     def test_prepare_release_moves_unreleased_into_versioned_section(self) -> None:
         original = """# Changelog\n\n## Unreleased\n\n### Fixed\n- Smoothed Claude flapping.\n\n## [0.1.0] - 2026-03-27\n\n### Added\n- Initial release.\n"""
@@ -75,12 +85,7 @@ class ChangelogScriptTests(unittest.TestCase):
         self.assertEqual(manifest["notes"], "### Fixed\n- Smoothed Claude flapping.")
         self.assertEqual(
             manifest["assets"],
-            {
-                "linux-x86_64": "https://github.com/ogulcancelik/herdr/releases/download/v0.1.1/herdr-linux-x86_64",
-                "linux-aarch64": "https://github.com/ogulcancelik/herdr/releases/download/v0.1.1/herdr-linux-aarch64",
-                "macos-x86_64": "https://github.com/ogulcancelik/herdr/releases/download/v0.1.1/herdr-macos-x86_64",
-                "macos-aarch64": "https://github.com/ogulcancelik/herdr/releases/download/v0.1.1/herdr-macos-aarch64",
-            },
+            asset_objects(default_release_assets("0.1.1")),
         )
         self.assertEqual(manifest["releases"]["0.1.1"]["assets"], manifest["assets"])
 
@@ -116,12 +121,12 @@ class ChangelogScriptTests(unittest.TestCase):
         self.assertEqual(list(manifest["releases"]), ["0.1.2", "0.1.1"])
         self.assertEqual(manifest["releases"]["0.1.2"]["notes"], "### Fixed\n- Two")
         self.assertEqual(manifest["releases"]["0.1.2"]["protocol"], read_protocol_version())
-        self.assertEqual(manifest["releases"]["0.1.2"]["assets"], default_release_assets("0.1.2"))
+        self.assertEqual(manifest["releases"]["0.1.2"]["assets"], asset_objects(default_release_assets("0.1.2")))
         self.assertEqual(manifest["releases"]["0.1.1"]["notes"], "### Fixed\n- One")
-        self.assertEqual(manifest["releases"]["0.1.1"]["assets"], default_release_assets("0.1.1"))
+        self.assertEqual(manifest["releases"]["0.1.1"]["assets"], asset_objects(default_release_assets("0.1.1")))
 
     def test_build_latest_json_accepts_release_metadata_assets(self) -> None:
-        assets = default_release_assets("0.1.1")
+        assets = asset_objects(default_release_assets("0.1.1"))
         manifest = json.loads(
             build_latest_json(
                 "0.1.2",
@@ -181,7 +186,7 @@ class ChangelogScriptTests(unittest.TestCase):
                 "0.1.1": {
                     "notes": "### Fixed\n- One",
                     "protocol": 3,
-                    "assets": default_release_assets("0.1.1"),
+                    "assets": asset_objects(default_release_assets("0.1.1")),
                     "announcement": {
                         "id": "one",
                         "title": "One",
@@ -207,8 +212,8 @@ class ChangelogScriptTests(unittest.TestCase):
         self.assertEqual(releases["0.1.2"]["notes"], "### Fixed\n- Root")
         self.assertEqual(releases["0.1.1"]["notes"], "### Fixed\n- One")
         self.assertEqual(releases["0.1.2"]["protocol"], read_protocol_version())
-        self.assertEqual(releases["0.1.2"]["assets"], default_release_assets("0.1.2"))
-        self.assertEqual(releases["0.1.1"]["assets"], default_release_assets("0.1.1"))
+        self.assertEqual(releases["0.1.2"]["assets"], asset_objects(default_release_assets("0.1.2")))
+        self.assertEqual(releases["0.1.1"]["assets"], asset_objects(default_release_assets("0.1.1")))
 
     def test_infer_protocol_from_notes(self) -> None:
         self.assertEqual(
@@ -391,12 +396,14 @@ class ChangelogScriptTests(unittest.TestCase):
             "version": "0.1.1",
             "protocol": read_protocol_version(),
             "notes": "### Fixed\n- One",
-            "assets": {
-                "linux-x86_64": "https://example.com/linux-x86_64",
-                "linux-aarch64": "https://example.com/linux-aarch64",
-                "macos-x86_64": "https://example.com/macos-x86_64",
-                "macos-aarch64": "https://example.com/macos-aarch64",
-            },
+            "assets": asset_objects(
+                {
+                    "linux-x86_64": "https://example.com/linux-x86_64",
+                    "linux-aarch64": "https://example.com/linux-aarch64",
+                    "macos-x86_64": "https://example.com/macos-x86_64",
+                    "macos-aarch64": "https://example.com/macos-aarch64",
+                }
+            ),
         }
 
         canonical = ensure_manifest_matches_expected(actual, expected, "test manifest")

@@ -66,6 +66,8 @@ pub(crate) struct ClientConnection {
     pub(crate) host_mouse_capture_active: Option<bool>,
     /// Last Kitty report-all mode sent to this client's host terminal.
     pub(crate) host_keyboard_report_all_active: Option<bool>,
+    /// Client-owned TUI presentation state staged for the runtime/client split.
+    pub(crate) client_view: Option<crate::app::state::ClientViewState>,
     /// Temporary files staged from this client's local clipboard image pastes.
     pub(crate) staged_clipboard_files: Vec<PathBuf>,
     /// Channels for sending framed ServerMessage data to the client writer thread.
@@ -130,6 +132,7 @@ impl ClientConnection {
             pane_graphics_render_pending: false,
             host_mouse_capture_active: None,
             host_keyboard_report_all_active: None,
+            client_view: None,
             staged_clipboard_files: Vec::new(),
             writer,
         }
@@ -318,4 +321,24 @@ pub(crate) fn render_targets(
 
     targets.sort_by_key(|(client_id, _, _, is_foreground, _)| (*is_foreground, *client_id));
     targets
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_client_connection_starts_without_client_view_state() {
+        let connection = ClientConnection::new(
+            (80, 24),
+            crate::kitty_graphics::HostCellSize::default(),
+            crate::terminal_theme::TerminalTheme::default(),
+            None,
+            1,
+            RenderEncoding::SemanticFrame,
+            None,
+        );
+
+        assert!(connection.client_view.is_none());
+    }
 }

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::{Mutex, OnceLock, RwLock},
 };
@@ -418,22 +419,31 @@ fn evaluate_loaded_manifest(
     include_update_status: bool,
 ) -> DetectionExplain {
     let mut matched: Option<(&ManifestRule, String)> = None;
-    let mut evaluated_rules = Vec::new();
+    let mut evaluated_rules = include_update_status.then(Vec::new).unwrap_or_default();
+    let mut lower_regions = HashMap::new();
 
     for (rule, compiled_rule) in loaded.manifest.rules.iter().zip(&loaded.compiled_rules) {
         let region_text = region(input, &rule.region);
-        let matched_rule = compiled_rule_matches(compiled_rule, region_text);
-        evaluated_rules.push(EvaluatedRule {
-            id: rule.id.clone(),
-            priority: rule.priority,
-            region: rule.region.clone(),
-            evidence: rule_evidence(rule, region_text),
-            state: rule
-                .state
-                .map(AgentState::from)
-                .unwrap_or(AgentState::Unknown),
-            matched: matched_rule,
+        let lower_text = compiled_rule.gate.needs_lower_text().then(|| {
+            lower_regions
+                .entry(rule.region.clone())
+                .or_insert_with(|| region_text.to_lowercase())
+                .as_str()
         });
+        let matched_rule = compiled_rule_matches(compiled_rule, region_text, lower_text);
+        if include_update_status {
+            evaluated_rules.push(EvaluatedRule {
+                id: rule.id.clone(),
+                priority: rule.priority,
+                region: rule.region.clone(),
+                evidence: rule_evidence(rule, region_text),
+                state: rule
+                    .state
+                    .map(AgentState::from)
+                    .unwrap_or(AgentState::Unknown),
+                matched: matched_rule,
+            });
+        }
 
         if !matched_rule {
             continue;
@@ -1175,9 +1185,8 @@ fn compile_gate(gate: &ManifestGate) -> Result<CompiledGate, String> {
     })
 }
 
-fn compiled_rule_matches(rule: &CompiledRule, text: &str) -> bool {
-    let lower_text = text.to_lowercase();
-    compiled_gate_matches(&rule.gate, text, &lower_text)
+fn compiled_rule_matches(rule: &CompiledRule, text: &str, lower_text: Option<&str>) -> bool {
+    compiled_gate_matches(&rule.gate, text, lower_text)
 }
 
 fn rule_evidence(rule: &ManifestRule, region_text: &str) -> RuleEvidence {
@@ -1202,11 +1211,12 @@ fn bounded_preview(text: &str) -> String {
     preview
 }
 
-fn compiled_gate_matches(gate: &CompiledGate, text: &str, lower_text: &str) -> bool {
-    if !gate
-        .contains
-        .iter()
-        .all(|needle| lower_text.contains(needle))
+fn compiled_gate_matches(gate: &CompiledGate, text: &str, lower_text: Option<&str>) -> bool {
+    if !gate.contains.is_empty()
+        && !gate
+            .contains
+            .iter()
+            .all(|needle| lower_text.is_some_and(|text| text.contains(needle)))
     {
         return false;
     }
@@ -1249,6 +1259,15 @@ fn compiled_gate_matches(gate: &CompiledGate, text: &str, lower_text: &str) -> b
     }
 
     true
+}
+
+impl CompiledGate {
+    fn needs_lower_text(&self) -> bool {
+        !self.contains.is_empty()
+            || self.all.iter().any(Self::needs_lower_text)
+            || self.any.iter().any(Self::needs_lower_text)
+            || self.not_gate.iter().any(Self::needs_lower_text)
+    }
 }
 
 fn region<'a>(input: DetectionInput<'a>, spec: &str) -> &'a str {

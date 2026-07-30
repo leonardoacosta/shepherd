@@ -1,0 +1,17 @@
+terminal_cols = 10
+terminal_rows = 3
+render_width = 10
+render_height = 3
+input_b64 = "YWJjG1sxRCE="
+
+expected_rows = [
+  ["a", "b", "!", " ", " ", " ", " ", " ", " ", " "],
+  [" ", " ", " ", " ", " ", " ", " ", " ", " ", " "],
+  [" ", " ", " ", " ", " ", " ", " ", " ", " ", " "],
+]
+
+[cursor]
+x = 3
+y = 0
+visible = true
+shape = 0

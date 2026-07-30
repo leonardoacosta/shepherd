@@ -75,6 +75,24 @@ You do not need to edit the changelog for normal PRs. Maintainers prepare `docs/
 
 If you are unsure whether docs are needed, mention it in the PR.
 
+## Prerequisites
+
+Before you build the repo or run its checks outside Nix, install:
+
+- rust `1.96.1` from [rust-toolchain.toml](./rust-toolchain.toml)
+- zig `0.15.2`
+- `just`
+- `cargo-nextest`
+- `python3`
+- `bun`
+
+Setup paths:
+
+- `nix develop` provides a dev shell with zig, bun, python3, `just`, and `cargo-nextest`
+- `mise` pins zig; install the remaining tools separately if you use that path
+
+If `cargo build --release` fails with `failed to execute zig build for vendored libghostty-vt`, install zig `0.15.2` first.
+
 ## Before submitting a PR
 
 Install the repo hook once in your clone.
@@ -83,7 +101,10 @@ Install the repo hook once in your clone.
 just install-hooks
 ```
 
-The pre-commit hook runs `cargo fmt --check` before every commit.
+The pre-commit hook runs `just lint` before every commit:
+
+- `cargo fmt --check`
+- `cargo clippy --all-targets --locked -- -D warnings`
 
 Run the PR checks and make sure they pass.
 
@@ -91,7 +112,12 @@ Run the PR checks and make sure they pass.
 just ci
 ```
 
-`just ci` runs `cargo fmt --check` and `cargo nextest run`.
+`just ci` runs:
+
+- `cargo fmt --check`
+- `cargo nextest run`
+- the Bun integration-asset tests
+- the plugin marketplace Bun test
 
 Do not open a PR that bypasses failing tests, formatting, or build errors.
 

@@ -1,0 +1,32 @@
+name: Vendor Upstream Drift
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 8 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vendor-upstream-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@1a2efb60207ab464b4e16754f2a9d9f6c070a7b7 # v5.4.0
+        with:
+          python-version: "3.13"
+
+      - name: Check vendored upstream drift
+        run: python3 scripts/vendor_upstream_drift.py

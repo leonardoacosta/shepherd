@@ -581,6 +581,43 @@ fn subscribe_request_parses_parameterized_subscriptions() {
 }
 
 #[test]
+fn subscribe_request_parses_pane_output_subscription() {
+    let json = r#"
+    {
+        "id": "sub_output",
+        "method": "events.subscribe",
+        "params": {
+            "subscriptions": [
+                {
+                    "type": "pane.output",
+                    "pane_id": "p_1_1",
+                    "source": "recent",
+                    "format": "text",
+                    "initial_tail_lines": 80
+                }
+            ]
+        }
+    }
+    "#;
+
+    let request: Request = serde_json::from_str(json).unwrap();
+    let Method::EventsSubscribe(params) = request.method else {
+        panic!("wrong method parsed");
+    };
+    assert_eq!(params.subscriptions.len(), 1);
+    assert!(matches!(
+        &params.subscriptions[0],
+        Subscription::PaneOutput {
+            pane_id,
+            source: ReadSource::Recent,
+            format: ReadFormat::Text,
+            initial_tail_lines: Some(80),
+            strip_ansi: true,
+        } if pane_id == "p_1_1"
+    ));
+}
+
+#[test]
 fn subscription_event_envelope_round_trips() {
     let event = SubscriptionEventEnvelope {
         event: SubscriptionEventKind::PaneOutputMatched,
@@ -602,6 +639,28 @@ fn subscription_event_envelope_round_trips() {
 
     let json = serde_json::to_string(&event).unwrap();
     assert!(json.contains("\"event\":\"pane.output_matched\""));
+    let restored: SubscriptionEventEnvelope = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored, event);
+}
+
+#[test]
+fn pane_output_subscription_event_round_trips() {
+    let event = SubscriptionEventEnvelope {
+        event: SubscriptionEventKind::PaneOutput,
+        data: SubscriptionEventData::PaneOutput(PaneOutputEvent {
+            pane_id: "p_1_1".into(),
+            source: ReadSource::Recent,
+            format: ReadFormat::Text,
+            revision: 12,
+            chunk: "tail line\n".into(),
+            truncated: false,
+            gap: false,
+            initial: true,
+        }),
+    };
+
+    let json = serde_json::to_string(&event).unwrap();
+    assert!(json.contains("\"event\":\"pane.output\""));
     let restored: SubscriptionEventEnvelope = serde_json::from_str(&json).unwrap();
     assert_eq!(restored, event);
 }

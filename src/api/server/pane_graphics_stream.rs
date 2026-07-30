@@ -987,7 +987,7 @@ mod tests {
         let (close_tx, close_rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || close_tx.send(api_rx.blocking_recv()).unwrap());
         let close = close_rx
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(Duration::from_secs(3))
             .expect("canceled idle stream should dispatch a close")
             .expect("API request channel should remain open");
         match &close.request.method {

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "protocol": 18,
+  "protocol": 19,
   "schema_version": 1,
   "schemas": {
     "error_response": {
@@ -3949,6 +3949,42 @@
             },
             {
               "properties": {
+                "format": {
+                  "$ref": "#/schemas/request/$defs/ReadFormat"
+                },
+                "initial_tail_lines": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "pane_id": {
+                  "type": "string"
+                },
+                "source": {
+                  "$ref": "#/schemas/request/$defs/ReadSource"
+                },
+                "strip_ansi": {
+                  "default": true,
+                  "type": "boolean"
+                },
+                "type": {
+                  "const": "pane.output",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id",
+                "source",
+                "format"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "agent_status": {
                   "anyOf": [
                     {
@@ -5888,6 +5924,47 @@
           ],
           "type": "object"
         },
+        "PaneOutputEvent": {
+          "properties": {
+            "chunk": {
+              "type": "string"
+            },
+            "format": {
+              "$ref": "#/schemas/subscription_event/$defs/ReadFormat"
+            },
+            "gap": {
+              "type": "boolean"
+            },
+            "initial": {
+              "type": "boolean"
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source": {
+              "$ref": "#/schemas/subscription_event/$defs/ReadSource"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "pane_id",
+            "source",
+            "format",
+            "revision",
+            "chunk",
+            "truncated",
+            "gap",
+            "initial"
+          ],
+          "type": "object"
+        },
         "PaneOutputMatchedEvent": {
           "properties": {
             "matched_line": {
@@ -6011,6 +6088,9 @@
         "SubscriptionEventData": {
           "anyOf": [
             {
+              "$ref": "#/schemas/subscription_event/$defs/PaneOutputEvent"
+            },
+            {
               "$ref": "#/schemas/subscription_event/$defs/PaneOutputMatchedEvent"
             },
             {
@@ -6023,6 +6103,7 @@
         },
         "SubscriptionEventKind": {
           "enum": [
+            "pane.output",
             "pane.output_matched",
             "pane.agent_status_changed",
             "pane.scroll_changed"

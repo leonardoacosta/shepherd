@@ -928,6 +928,9 @@ mod tests {
             ("logs", Agent::Claude),
             ("review", Agent::Codex),
             ("ops", Agent::Gemini),
+            ("build", Agent::Amp),
+            ("triage", Agent::Kimi),
+            ("sync", Agent::OpenCode),
         ] {
             let tab_idx = ws.test_add_tab(Some(tab_name));
             let pane_id = ws.tabs[tab_idx].root_pane;
@@ -957,6 +960,8 @@ mod tests {
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.mode = Mode::Terminal;
+        app.state.view.sidebar_rect.height = 10;
+        app.state.view.agent_panel_entries = crate::ui::agent_panel_entries(&app.state);
 
         let detail_area = app.state.agent_panel_rect();
         assert!(crate::ui::should_show_scrollbar(
