@@ -108,30 +108,15 @@ pub fn start_server_with_capabilities(
                     let connection_running = Arc::clone(&listener_running);
                     let active_connections = Arc::clone(&active_connections);
                     std::thread::spawn(move || {
-                        let slot = match try_acquire_connection_slot(
-                            &active_connections,
-                            MAX_API_CONNECTIONS,
-                        ) {
-                            Some(slot) => slot,
-                            None => {
-                                let mut stream = stream;
-                                let _ = write_too_many_connections_error(
-                                    &mut stream,
-                                    MAX_API_CONNECTIONS,
-                                );
-                                return;
-                            }
-                        };
-                        if let Err(err) = handle_connection(
+                        handle_incoming_connection(
                             stream,
                             &api_tx,
                             &event_hub,
                             &connection_running,
                             capabilities,
-                        ) {
-                            warn!(err = %err, "api connection failed");
-                        }
-                        drop(slot);
+                            &active_connections,
+                            crate::ipc::peer_uid_authorized,
+                        );
                     });
                 }
                 Err(err) => {
@@ -149,6 +134,50 @@ pub fn start_server_with_capabilities(
         identity,
         running,
     })
+}
+
+/// Authorizes the connecting peer, enforces the connection limit, and dispatches to
+/// `handle_connection` — in that order, so an unauthorized peer is rejected before it can
+/// consume a connection slot or reach any request dispatch. `authorize_peer` is injected so
+/// tests can simulate a peer-uid mismatch without real uid-switch privilege (see
+/// `openspec/changes/spike-socket-auth-capability/tasks.md` step 2's gate).
+fn handle_incoming_connection(
+    stream: LocalStream,
+    api_tx: &ApiRequestSender,
+    event_hub: &EventHub,
+    running: &Arc<AtomicBool>,
+    capabilities: Option<ServerCapabilities>,
+    active_connections: &AtomicUsize,
+    authorize_peer: impl FnOnce(&LocalStream) -> io::Result<bool>,
+) {
+    match authorize_peer(&stream) {
+        Ok(true) => {}
+        Ok(false) => {
+            warn!("rejected api connection: peer uid does not match server uid");
+            let mut stream = stream;
+            let _ = write_peer_uid_mismatch_error(&mut stream);
+            return;
+        }
+        Err(err) => {
+            warn!(err = %err, "failed to verify api connection peer credentials");
+            let mut stream = stream;
+            let _ = write_peer_uid_mismatch_error(&mut stream);
+            return;
+        }
+    }
+
+    let slot = match try_acquire_connection_slot(active_connections, MAX_API_CONNECTIONS) {
+        Some(slot) => slot,
+        None => {
+            let mut stream = stream;
+            let _ = write_too_many_connections_error(&mut stream, MAX_API_CONNECTIONS);
+            return;
+        }
+    };
+    if let Err(err) = handle_connection(stream, api_tx, event_hub, running, capabilities) {
+        warn!(err = %err, "api connection failed");
+    }
+    drop(slot);
 }
 
 fn try_acquire_connection_slot(active: &AtomicUsize, limit: usize) -> Option<ConnectionSlot<'_>> {
@@ -174,6 +203,19 @@ fn write_too_many_connections_error(stream: &mut LocalStream, limit: usize) -> i
             error: ErrorBody {
                 code: "too_many_connections".into(),
                 message: format!("too many concurrent api connections (limit: {limit})"),
+            },
+        },
+    )
+}
+
+fn write_peer_uid_mismatch_error(stream: &mut LocalStream) -> io::Result<()> {
+    write_json_line_allow_disconnect(
+        stream,
+        &ErrorResponse {
+            id: String::new(),
+            error: ErrorBody {
+                code: "peer_uid_mismatch".into(),
+                message: "connection rejected: peer uid does not match server uid".into(),
             },
         },
     )
@@ -1132,6 +1174,61 @@ mod tests {
         assert_eq!(
             response["error"]["message"],
             "too many concurrent api connections (limit: 7)"
+        );
+    }
+
+    #[test]
+    fn peer_cred_mismatch_rejects_connection_before_dispatch() {
+        // Real uid-switching isn't available in CI, so the mismatch is simulated through the
+        // injected `authorize_peer` seam rather than an actual different-uid caller (real
+        // syscall path covered by `ipc::tests::peer_cred_authorizes_same_process_connection`).
+        let (mut client, server, _path) = local_stream_pair("peer-cred-mismatch");
+        let (api_tx, mut api_rx) = mpsc::unbounded_channel::<ApiRequestMessage>();
+        let active_connections = AtomicUsize::new(0);
+        let running = Arc::new(AtomicBool::new(true));
+        let event_hub = EventHub::default();
+
+        handle_incoming_connection(
+            server,
+            &api_tx,
+            &event_hub,
+            &running,
+            None,
+            &active_connections,
+            |_stream| Ok(false),
+        );
+
+        let response: serde_json::Value = serde_json::from_str(&read_line(&mut client)).unwrap();
+        assert_eq!(response["error"]["code"], "peer_uid_mismatch");
+        assert!(
+            api_rx.try_recv().is_err(),
+            "a rejected peer must never reach request dispatch"
+        );
+    }
+
+    #[test]
+    fn peer_cred_check_error_rejects_connection_before_dispatch() {
+        let (mut client, server, _path) = local_stream_pair("peer-cred-check-error");
+        let (api_tx, mut api_rx) = mpsc::unbounded_channel::<ApiRequestMessage>();
+        let active_connections = AtomicUsize::new(0);
+        let running = Arc::new(AtomicBool::new(true));
+        let event_hub = EventHub::default();
+
+        handle_incoming_connection(
+            server,
+            &api_tx,
+            &event_hub,
+            &running,
+            None,
+            &active_connections,
+            |_stream| Err(io::Error::other("peer credential lookup failed")),
+        );
+
+        let response: serde_json::Value = serde_json::from_str(&read_line(&mut client)).unwrap();
+        assert_eq!(response["error"]["code"], "peer_uid_mismatch");
+        assert!(
+            api_rx.try_recv().is_err(),
+            "a failed peer check must fail closed, never reaching request dispatch"
         );
     }
 

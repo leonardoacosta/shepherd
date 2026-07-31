@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Connections to the Herdr socket from a process running as a different user are now rejected on Linux and macOS.
+
 ### Changed
 - Agent status indicators now use the same static workspace marks across the sidebar, navigator, and mobile views, eliminating continuous spinner rendering while agents work.
 - Relicensed Herdr from AGPL-3.0-or-later to Apache-2.0.

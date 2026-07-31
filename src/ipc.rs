@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::{self, Read};
 #[cfg(unix)]
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, RawFd};
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
@@ -219,6 +219,70 @@ fn windows_named_pipe_available(stream: &mut LocalStream) -> io::Result<Option<u
     Err(err)
 }
 
+/// Reports whether the connected peer's uid matches the current process's uid,
+/// rejecting the accept-time same-uid trust boundary from resting on file
+/// permissions alone (`spike-socket-auth-capability`). Linux uses
+/// `SO_PEERCRED`, macOS uses `getpeereid`; both read kernel-verified peer
+/// identity off the raw fd, so a peer cannot spoof it.
+#[cfg(unix)]
+pub(crate) fn peer_uid_authorized(stream: &LocalStream) -> io::Result<bool> {
+    let peer_uid = stream_peer_uid(stream)?;
+    Ok(peer_uid == unsafe { libc::getuid() })
+}
+
+/// Windows named pipes have no dependency-available equivalent to
+/// `SO_PEERCRED`/`getpeereid` today: a real check needs
+/// `GetNamedPipeClientProcessId` plus opening the peer process token
+/// (`OpenProcessToken`/`GetTokenInformation(TokenUser)`) to compare SIDs,
+/// which needs a `Win32_Security` feature flag not enabled in `Cargo.toml`,
+/// and even then cannot distinguish "same interactive session, different
+/// process" from "genuinely different user" without session-enumeration APIs
+/// outside the current dependency tree (see
+/// `openspec/changes/spike-socket-auth-capability/tasks.md` STOP conditions).
+/// Documented gap, matching `restrict_socket_permissions`'s existing Windows
+/// no-op precedent: always allow rather than silently rejecting or shipping a
+/// check that only looks real.
+#[cfg(windows)]
+pub(crate) fn peer_uid_authorized(_stream: &LocalStream) -> io::Result<bool> {
+    Ok(true)
+}
+
+#[cfg(unix)]
+fn stream_peer_uid(stream: &LocalStream) -> io::Result<u32> {
+    let LocalStream::UdSocket(inner) = stream;
+    raw_fd_peer_uid(inner.inner().as_raw_fd())
+}
+
+#[cfg(target_os = "linux")]
+fn raw_fd_peer_uid(fd: RawFd) -> io::Result<u32> {
+    let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let ret = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&mut cred as *mut libc::ucred).cast(),
+            &mut len,
+        )
+    };
+    if ret != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(cred.uid)
+}
+
+#[cfg(target_os = "macos")]
+fn raw_fd_peer_uid(fd: RawFd) -> io::Result<u32> {
+    let mut uid: libc::uid_t = 0;
+    let mut gid: libc::gid_t = 0;
+    let ret = unsafe { libc::getpeereid(fd, &mut uid, &mut gid) };
+    if ret != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(uid)
+}
+
 pub(crate) fn is_connection_closed_error(err: &io::Error) -> bool {
     matches!(
         err.kind(),
@@ -335,6 +399,26 @@ mod tests {
         let mut buf = [0u8; 1];
         assert_eq!(server.read(&mut buf).expect("server reads byte"), 1);
         assert_eq!(buf[0], b'x');
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn peer_cred_authorizes_same_process_connection() {
+        // A same-process client/server pair always shares a uid, so this exercises the real
+        // getsockopt(SO_PEERCRED)/getpeereid syscall path end to end. The mismatch path (a
+        // different uid rejected before dispatch) needs real privilege drop that CI does not
+        // have; it is covered via an injectable authorizer in
+        // src/api/server.rs and src/server/client_accept.rs's tests instead.
+        let path = temp_socket_marker_path("peer-cred-same-uid");
+        let _ = fs::remove_file(&path);
+
+        let listener = bind_local_listener(&path).expect("bind listener");
+        let _client = connect_local_stream(&path).expect("connect client");
+        let server = listener.accept().expect("accept server");
+
+        assert!(peer_uid_authorized(&server).expect("peer uid check"));
 
         let _ = fs::remove_file(path);
     }

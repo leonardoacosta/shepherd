@@ -48,6 +48,10 @@ pub(crate) struct PlatformCapabilities {
     pub(crate) remote_attach: bool,
     pub(crate) direct_terminal_attach: bool,
     pub(crate) preserve_legacy_doubled_escape_input: bool,
+    /// Whether `crate::ipc::peer_uid_authorized` performs a real kernel-verified
+    /// peer-uid check (`SO_PEERCRED`/`getpeereid`) rather than the Windows
+    /// documented-gap no-op. See `peer_uid_authorized`'s doc comment.
+    pub(crate) peer_credential_check: bool,
 }
 
 pub(crate) const fn capabilities() -> PlatformCapabilities {
@@ -56,6 +60,7 @@ pub(crate) const fn capabilities() -> PlatformCapabilities {
         remote_attach: cfg!(unix),
         direct_terminal_attach: cfg!(unix),
         preserve_legacy_doubled_escape_input: cfg!(target_os = "macos"),
+        peer_credential_check: cfg!(unix),
     }
 }
 
