@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::Serialize;
+
 use crate::api::schema::{
     InstalledPluginInfo, Method, PluginActionInvokeParams, PluginActionListParams,
     PluginInvocationContext, PluginLinkParams, PluginListParams, PluginLogListParams,
@@ -27,6 +29,7 @@ pub(super) fn run_plugin_command(args: &[String]) -> std::io::Result<i32> {
         "uninstall" => plugin_uninstall(&args[1..]),
         "link" => plugin_link(&args[1..]),
         "list" => plugin_list(&args[1..]),
+        "outdated" => plugin_outdated(&args[1..]),
         "config-dir" => plugin_config_dir_command(&args[1..]),
         "unlink" => plugin_unlink(&args[1..]),
         "enable" => plugin_set_enabled(&args[1..], true),
@@ -135,6 +138,297 @@ fn plugin_list(args: &[String]) -> std::io::Result<i32> {
         return super::print_response(&response);
     }
     print_plugin_list_human(&response)
+}
+
+/// Read-only upstream drift check: one `git ls-remote` per GitHub-sourced plugin,
+/// compared against the commit recorded at install time. Never fetches plugin
+/// code, checks anything out, or runs a plugin command.
+fn plugin_outdated(args: &[String]) -> std::io::Result<i32> {
+    let mut plugin_id = None;
+    let mut json = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                json = true;
+                index += 1;
+            }
+            "--plugin" => {
+                let Some(value) = required_value(args, &mut index, "--plugin") else {
+                    return Ok(2);
+                };
+                plugin_id = Some(value);
+            }
+            other => {
+                eprintln!("unknown option: {other}");
+                return Ok(2);
+            }
+        }
+    }
+
+    let plugins = match live_installed_plugins() {
+        Ok(plugins) => plugins,
+        Err(err) if is_connection_error(&err) => registry_plugins(),
+        Err(err) => return Err(err),
+    };
+    let mut plugins = plugins
+        .into_iter()
+        .filter(|plugin| {
+            plugin_id
+                .as_deref()
+                .is_none_or(|plugin_id| plugin.plugin_id == plugin_id)
+        })
+        .collect::<Vec<_>>();
+    plugins.sort_by(|a, b| a.plugin_id.cmp(&b.plugin_id));
+
+    if plugins.is_empty() {
+        if let Some(plugin_id) = plugin_id {
+            eprintln!("plugin not installed: {plugin_id}");
+            return Ok(1);
+        }
+        if json {
+            println!("[]");
+        } else {
+            println!("No plugins installed.");
+        }
+        return Ok(0);
+    }
+
+    let reports = plugins
+        .iter()
+        .map(|plugin| plugin_outdated_report(plugin, git_ls_remote_refs))
+        .collect::<Vec<_>>();
+
+    if json {
+        let rendered = serde_json::to_string_pretty(&reports).map_err(std::io::Error::other)?;
+        println!("{rendered}");
+        return Ok(0);
+    }
+    print_plugin_outdated_human(&reports);
+    Ok(0)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum PluginOutdatedStatus {
+    Current,
+    Outdated,
+    /// Installed from an exact commit, so upstream has no "newer" answer for it.
+    Pinned,
+    /// Local plugin: no upstream to diff against.
+    NotApplicable,
+    /// Best-effort outcome for one plugin (missing provenance, unreachable or
+    /// ambiguous ref). Reported per plugin so it never fails the whole sweep.
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct PluginOutdatedReport {
+    plugin_id: String,
+    status: PluginOutdatedStatus,
+    source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    checked_ref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    installed_commit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_commit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+}
+
+type LsRemoteRefs = Result<Vec<(String, String)>, String>;
+
+fn plugin_outdated_report(
+    plugin: &InstalledPluginInfo,
+    ls_remote: impl Fn(&str, &str) -> LsRemoteRefs,
+) -> PluginOutdatedReport {
+    let mut report = PluginOutdatedReport {
+        plugin_id: plugin.plugin_id.clone(),
+        status: PluginOutdatedStatus::Unknown,
+        source: source_display(plugin),
+        checked_ref: None,
+        installed_commit: plugin.source.resolved_commit.clone(),
+        remote_commit: None,
+        detail: None,
+    };
+    if plugin.source.kind != PluginSourceKind::Github {
+        report.status = PluginOutdatedStatus::NotApplicable;
+        report.detail = Some("local plugin: no upstream to compare".to_string());
+        return report;
+    }
+    let (Some(owner), Some(repo)) = (
+        plugin.source.owner.as_deref(),
+        plugin.source.repo.as_deref(),
+    ) else {
+        report.detail = Some("recorded source is missing owner/repo".to_string());
+        return report;
+    };
+    let Some(installed_commit) = plugin.source.resolved_commit.as_deref() else {
+        report.detail = Some("no resolved commit recorded at install time".to_string());
+        return report;
+    };
+    let requested_ref = plugin.source.requested_ref.as_deref();
+    if requested_ref.is_some_and(looks_like_commit_sha) {
+        report.status = PluginOutdatedStatus::Pinned;
+        report.checked_ref = requested_ref.map(str::to_string);
+        report.detail =
+            Some("installed from an exact commit; upstream has no newer answer".to_string());
+        return report;
+    }
+    // Install resolves a missing --ref through the remote's default branch.
+    let reference = requested_ref.unwrap_or("HEAD");
+    report.checked_ref = Some(reference.to_string());
+    let remote_url = GithubPluginSource {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        subdir: plugin.source.subdir.clone(),
+    }
+    .remote_url();
+    let matched = match ls_remote(&remote_url, reference) {
+        Ok(matched) => prefer_peeled_refs(matched),
+        Err(err) => {
+            report.detail = Some(err);
+            return report;
+        }
+    };
+    let mut commits = matched
+        .iter()
+        .map(|(commit, _)| commit.as_str())
+        .collect::<Vec<_>>();
+    commits.sort_unstable();
+    commits.dedup();
+    match commits.as_slice() {
+        [] => {
+            report.detail = Some(format!("ref '{reference}' not found at {remote_url}"));
+        }
+        [remote_commit] => {
+            report.remote_commit = Some((*remote_commit).to_string());
+            report.status = if commits_match(installed_commit, remote_commit) {
+                PluginOutdatedStatus::Current
+            } else {
+                PluginOutdatedStatus::Outdated
+            };
+        }
+        _ => {
+            let names = matched
+                .iter()
+                .map(|(_, name)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            report.detail = Some(format!(
+                "ref '{reference}' is ambiguous upstream (matches {names})"
+            ));
+        }
+    }
+    report
+}
+
+/// `git ls-remote` reports an annotated tag as both the tag object and its
+/// peeled `^{}` commit; install resolves to the commit, so compare against that.
+fn prefer_peeled_refs(refs: Vec<(String, String)>) -> Vec<(String, String)> {
+    if refs.iter().any(|(_, name)| name.ends_with("^{}")) {
+        return refs
+            .into_iter()
+            .filter(|(_, name)| name.ends_with("^{}"))
+            .collect();
+    }
+    refs
+}
+
+fn looks_like_commit_sha(value: &str) -> bool {
+    let value = value.trim();
+    (7..=40).contains(&value.len()) && value.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+/// Registries may hold an abbreviated commit, so compare on the shared prefix.
+fn commits_match(installed: &str, remote: &str) -> bool {
+    let installed = installed.trim();
+    let remote = remote.trim();
+    if installed.len().min(remote.len()) < 7 {
+        return false;
+    }
+    installed
+        .chars()
+        .zip(remote.chars())
+        .all(|(left, right)| left.eq_ignore_ascii_case(&right))
+}
+
+fn parse_ls_remote_refs(stdout: &str) -> Vec<(String, String)> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let (commit, name) = line.split_once('\t')?;
+            let (commit, name) = (commit.trim(), name.trim());
+            if commit.is_empty() || name.is_empty() {
+                return None;
+            }
+            Some((commit.to_string(), name.to_string()))
+        })
+        .collect()
+}
+
+fn git_ls_remote_refs(remote_url: &str, reference: &str) -> LsRemoteRefs {
+    let mut command = crate::noninteractive_process::command("git");
+    command.args(["ls-remote", "--", remote_url, reference]);
+    // One unreachable or private repo must not block the sweep on a credential prompt.
+    command.env("GIT_TERMINAL_PROMPT", "0");
+    command.stdin(Stdio::null());
+    let output = command
+        .output()
+        .map_err(|err| format!("git ls-remote failed to start: {err}"))?;
+    if !output.status.success() {
+        return Err(command_failure_message("git ls-remote", &output));
+    }
+    Ok(parse_ls_remote_refs(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+fn plugin_outdated_status_label(status: PluginOutdatedStatus) -> &'static str {
+    match status {
+        PluginOutdatedStatus::Current => "current",
+        PluginOutdatedStatus::Outdated => "outdated",
+        PluginOutdatedStatus::Pinned => "pinned",
+        PluginOutdatedStatus::NotApplicable => "n/a",
+        PluginOutdatedStatus::Unknown => "unknown",
+    }
+}
+
+fn short_commit(commit: &str) -> String {
+    commit.chars().take(12).collect()
+}
+
+fn print_plugin_outdated_human(reports: &[PluginOutdatedReport]) {
+    println!(
+        "{} plugin{} checked:",
+        reports.len(),
+        if reports.len() == 1 { "" } else { "s" }
+    );
+    for report in reports {
+        println!(
+            "- {}: {} [{}]",
+            report.plugin_id,
+            plugin_outdated_status_label(report.status),
+            report.source
+        );
+        if let (Some(installed), Some(remote)) = (&report.installed_commit, &report.remote_commit) {
+            println!(
+                "  installed: {}  upstream: {}",
+                short_commit(installed),
+                short_commit(remote)
+            );
+        }
+        if let Some(detail) = &report.detail {
+            println!("  {detail}");
+        }
+    }
+    if reports
+        .iter()
+        .any(|report| report.status == PluginOutdatedStatus::Outdated)
+    {
+        println!("Re-run `herdr plugin install <owner>/<repo>[/subdir...]` to update a plugin.");
+    }
 }
 
 fn plugin_unlink(args: &[String]) -> std::io::Result<i32> {
@@ -1641,6 +1935,7 @@ fn print_plugin_help() {
     eprintln!("  herdr plugin uninstall <plugin_id|owner/repo[/subdir...]>");
     eprintln!("  herdr plugin link <path> [--disabled]");
     eprintln!("  herdr plugin list [--plugin ID] [--json]");
+    eprintln!("  herdr plugin outdated [--plugin ID] [--json]");
     eprintln!("  herdr plugin config-dir <plugin_id>");
     eprintln!("  herdr plugin unlink <plugin_id>");
     eprintln!("  herdr plugin enable <plugin_id>");
@@ -1798,6 +2093,245 @@ mod tests {
         plugin.source = PluginSourceInfo::default();
 
         assert!(plugin_by_github_source([plugin], &source).is_none());
+    }
+
+    fn unreachable_ls_remote(_remote_url: &str, _reference: &str) -> LsRemoteRefs {
+        panic!("outdated check must not query a remote for this plugin")
+    }
+
+    fn ls_remote_returning(refs: &[(&str, &str)]) -> impl Fn(&str, &str) -> LsRemoteRefs {
+        let refs = refs
+            .iter()
+            .map(|(commit, name)| (commit.to_string(), name.to_string()))
+            .collect::<Vec<_>>();
+        move |_remote_url, _reference| Ok(refs.clone())
+    }
+
+    #[test]
+    fn outdated_report_flags_moved_upstream_commit() {
+        let mut plugin = github_plugin(
+            "examples.moved",
+            "ogulcancelik",
+            "herdr-plugin-examples",
+            Some("worktree-bootstrap"),
+        );
+        plugin.source.requested_ref = Some("main".to_string());
+        plugin.source.resolved_commit = Some("a".repeat(40));
+
+        let report = plugin_outdated_report(
+            &plugin,
+            ls_remote_returning(&[(&"b".repeat(40), "refs/heads/main")]),
+        );
+
+        assert_eq!(report.status, PluginOutdatedStatus::Outdated);
+        assert_eq!(report.checked_ref.as_deref(), Some("main"));
+        assert_eq!(report.installed_commit, Some("a".repeat(40)));
+        assert_eq!(report.remote_commit, Some("b".repeat(40)));
+        assert_eq!(report.detail, None);
+    }
+
+    #[test]
+    fn outdated_report_reports_remote_tip_as_current() {
+        let mut plugin = github_plugin(
+            "examples.current",
+            "ogulcancelik",
+            "herdr-plugin-examples",
+            None,
+        );
+        plugin.source.requested_ref = None;
+        plugin.source.resolved_commit = Some("c".repeat(40));
+
+        let report = plugin_outdated_report(
+            &plugin,
+            ls_remote_returning(&[(&"C".repeat(40), "refs/heads/master")]),
+        );
+
+        assert_eq!(report.status, PluginOutdatedStatus::Current);
+        // No recorded ref means install resolved through the remote default branch.
+        assert_eq!(report.checked_ref.as_deref(), Some("HEAD"));
+    }
+
+    #[test]
+    fn outdated_report_treats_local_plugins_as_not_applicable() {
+        let mut plugin = github_plugin("examples.local", "ogulcancelik", "examples", None);
+        plugin.source = PluginSourceInfo::default();
+
+        let report = plugin_outdated_report(&plugin, unreachable_ls_remote);
+
+        assert_eq!(report.status, PluginOutdatedStatus::NotApplicable);
+        assert_eq!(
+            report.detail.as_deref(),
+            Some("local plugin: no upstream to compare")
+        );
+    }
+
+    #[test]
+    fn outdated_report_treats_commit_ref_as_pinned_without_querying_remote() {
+        let mut plugin = github_plugin("examples.pinned", "ogulcancelik", "examples", None);
+        plugin.source.requested_ref = Some("a".repeat(40));
+        plugin.source.resolved_commit = Some("a".repeat(40));
+
+        let report = plugin_outdated_report(&plugin, unreachable_ls_remote);
+
+        assert_eq!(report.status, PluginOutdatedStatus::Pinned);
+        assert_eq!(report.remote_commit, None);
+    }
+
+    #[test]
+    fn outdated_report_is_unknown_without_recorded_commit() {
+        let mut plugin = github_plugin("examples.legacy", "ogulcancelik", "examples", None);
+        plugin.source.resolved_commit = None;
+
+        let report = plugin_outdated_report(&plugin, unreachable_ls_remote);
+
+        assert_eq!(report.status, PluginOutdatedStatus::Unknown);
+        assert_eq!(
+            report.detail.as_deref(),
+            Some("no resolved commit recorded at install time")
+        );
+    }
+
+    #[test]
+    fn outdated_report_labels_missing_and_ambiguous_refs_per_plugin() {
+        let mut plugin = github_plugin("examples.ambiguous", "ogulcancelik", "examples", None);
+        plugin.source.requested_ref = Some("release".to_string());
+        plugin.source.resolved_commit = Some("a".repeat(40));
+
+        let missing = plugin_outdated_report(&plugin, ls_remote_returning(&[]));
+        assert_eq!(missing.status, PluginOutdatedStatus::Unknown);
+        assert!(
+            missing
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("not found")),
+            "{missing:?}"
+        );
+
+        let ambiguous = plugin_outdated_report(
+            &plugin,
+            ls_remote_returning(&[
+                (&"b".repeat(40), "refs/heads/release"),
+                (&"c".repeat(40), "refs/tags/release"),
+            ]),
+        );
+        assert_eq!(ambiguous.status, PluginOutdatedStatus::Unknown);
+        assert!(
+            ambiguous
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("ambiguous")),
+            "{ambiguous:?}"
+        );
+    }
+
+    #[test]
+    fn outdated_report_compares_annotated_tag_against_peeled_commit() {
+        let mut plugin = github_plugin("examples.tagged", "ogulcancelik", "examples", None);
+        plugin.source.requested_ref = Some("v1.0.0".to_string());
+        plugin.source.resolved_commit = Some("d".repeat(40));
+
+        let report = plugin_outdated_report(
+            &plugin,
+            ls_remote_returning(&[
+                (&"e".repeat(40), "refs/tags/v1.0.0"),
+                (&"d".repeat(40), "refs/tags/v1.0.0^{}"),
+            ]),
+        );
+
+        assert_eq!(report.status, PluginOutdatedStatus::Current);
+        assert_eq!(report.remote_commit, Some("d".repeat(40)));
+    }
+
+    #[test]
+    fn outdated_report_surfaces_remote_failure_without_failing_the_sweep() {
+        let mut plugin = github_plugin("examples.unreachable", "ogulcancelik", "examples", None);
+        plugin.source.requested_ref = Some("main".to_string());
+        plugin.source.resolved_commit = Some("a".repeat(40));
+
+        let report = plugin_outdated_report(&plugin, |_remote_url, _reference| {
+            Err("git ls-remote failed with status exit status: 128".to_string())
+        });
+
+        assert_eq!(report.status, PluginOutdatedStatus::Unknown);
+        assert!(
+            report
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("exit status: 128")),
+            "{report:?}"
+        );
+    }
+
+    #[test]
+    fn outdated_report_is_unknown_when_source_lacks_owner_or_repo() {
+        let mut plugin = github_plugin("examples.partial", "ogulcancelik", "examples", None);
+        plugin.source.repo = None;
+
+        let report = plugin_outdated_report(&plugin, unreachable_ls_remote);
+
+        assert_eq!(report.status, PluginOutdatedStatus::Unknown);
+        assert_eq!(
+            report.detail.as_deref(),
+            Some("recorded source is missing owner/repo")
+        );
+    }
+
+    #[test]
+    fn ls_remote_parsing_and_commit_comparison_helpers() {
+        let parsed = parse_ls_remote_refs(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/main\nnot a ref line\n\n",
+        );
+        assert_eq!(
+            parsed,
+            vec![(
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+                "refs/heads/main".to_string()
+            )]
+        );
+
+        assert!(looks_like_commit_sha("abc1234"));
+        assert!(looks_like_commit_sha(&"f".repeat(40)));
+        assert!(!looks_like_commit_sha("main"));
+        assert!(!looks_like_commit_sha("v1.0.0"));
+        assert!(!looks_like_commit_sha("abc123"));
+
+        assert!(commits_match(&"a".repeat(40), &"A".repeat(40)));
+        assert!(commits_match(
+            "abc1234",
+            &format!("abc1234{}", "0".repeat(33))
+        ));
+        assert!(!commits_match("abc123", &"a".repeat(40)));
+        assert!(!commits_match(&"a".repeat(40), &"b".repeat(40)));
+    }
+
+    #[test]
+    fn git_ls_remote_refs_reads_refs_from_a_real_repository() {
+        let repo = std::env::temp_dir().join(unique_plugin_id("ls-remote"));
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        };
+        git(&["init", "--quiet"]);
+        git(&["config", "user.email", "herdr@example.invalid"]);
+        git(&["config", "user.name", "Herdr Test"]);
+        git(&["commit", "--quiet", "--allow-empty", "-m", "initial"]);
+        let head = git(&["rev-parse", "HEAD"]);
+
+        let refs = git_ls_remote_refs(&repo.display().to_string(), "HEAD").unwrap();
+
+        assert_eq!(refs, vec![(head, "HEAD".to_string())]);
+        let _ = std::fs::remove_dir_all(&repo);
     }
 
     #[test]

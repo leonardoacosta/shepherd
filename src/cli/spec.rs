@@ -807,6 +807,12 @@ fn plugin_command() -> Command {
                 .arg(json_flag()),
         )
         .subcommand(
+            Command::new("outdated")
+                .about("Compare installed plugins against their upstream git ref")
+                .arg(option("plugin", "ID"))
+                .arg(json_flag()),
+        )
+        .subcommand(
             Command::new("config-dir")
                 .about("Print a plugin config directory")
                 .arg(required("plugin_id", "PLUGIN_ID")),

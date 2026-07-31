@@ -169,6 +169,46 @@ mod tests {
         assert!(ids.contains(&"example.b"));
     }
 
+    /// Registries written before `InstalledPluginInfo::source` existed have no
+    /// `source` key at all; they must still load instead of tripping the strict
+    /// read that every mutation goes through.
+    #[test]
+    fn legacy_registry_without_source_key_still_loads() {
+        let path = temp_registry_path("legacy-no-source");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(
+            &path,
+            br#"[
+  {
+    "plugin_id": "example.legacy",
+    "name": "Legacy Plugin",
+    "version": "0.1.0",
+    "manifest_path": "/tmp/example.legacy/herdr-plugin.toml",
+    "plugin_root": "/tmp/example.legacy",
+    "enabled": true
+  }
+]"#,
+        )
+        .unwrap();
+
+        let loaded = load_from_path_strict(&path).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].plugin_id, "example.legacy");
+        assert_eq!(loaded[0].min_herdr_version, "");
+        assert_eq!(
+            loaded[0].source,
+            crate::api::schema::PluginSourceInfo::default()
+        );
+        assert_eq!(
+            loaded[0].source.kind,
+            crate::api::schema::PluginSourceKind::Local
+        );
+        assert!(loaded[0].source.resolved_commit.is_none());
+        assert!(loaded[0].source.installed_unix_ms.is_none());
+    }
+
     #[test]
     fn missing_file_returns_empty() {
         let path = temp_registry_path("missing");
