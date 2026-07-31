@@ -1,12 +1,6 @@
-# Spike: socket-level auth / capability tiering  — DEFERRED (backlog)
+# Spike: socket-level auth / capability tiering
 
-Base commit: `1de05dc2` · Route: bead-equivalent spike · Status: **DEFERRED / not scheduled** · Category: security
-
-> Recorded as a deferred spike ("bead") for later, per maintainer request. herdr
-> tracks work in `openspec/`, not a beads DB, so this stub lives here as the
-> bead-equivalent: a short, tracked, unscheduled placeholder — **not** a full
-> proposal. Promote it to a real proposal (add a `tasks.md`, drop the DEFERRED
-> banner) when it's picked up. No `tasks.md` intentionally.
+Base commit: `c000681f` · Route: design spike · Category: security
 
 ## The idea (one paragraph)
 
@@ -24,25 +18,37 @@ so the hardening done piecemeal in `harden-live-handoff` and
 
 ## Why it's grounded (evidence)
 
-- `src/api/server.rs:~139-200` — connections served with no authentication, no
-  capability negotiation, no peer check.
-- `src/server/client_accept.rs:19-45` — client handshake likewise unauthenticated.
-- `src/ipc.rs:~277` — access control is post-hoc file-permission restriction only;
-  `restrict_socket_permissions` is a no-op on Windows (`:283`).
+- `src/api/server.rs:85-152` (`start_server_with_capabilities`, accept loop
+  :101-144) — connections served with no authentication, no capability
+  negotiation, no peer check; `:195-237` (`handle_connection`) dispatches every
+  method with no per-call authorization. A connection-count limit landed since
+  the original evidence pass (`MAX_API_CONNECTIONS`, :34) but it bounds
+  concurrency, not identity — it does not change this finding.
+- `src/server/client_accept.rs:45-95`
+  (`accept_pending_client_connections_with_limit`) — client handshake likewise
+  unauthenticated; the handshake spawn itself is at `:74-84`. Same drift as
+  above: a connection limit was added, no peer check.
+- `src/ipc.rs:287-292` (`restrict_socket_permissions`, unix) — access control is
+  post-hoc file-permission restriction only; `:294-297` is the Windows no-op
+  (unchanged in shape, just moved a few lines from prior citation).
 - Powerful methods on the same flat surface: `server.live_handoff`
-  (`src/api/schema.rs:50`), plugin link/enable/invoke (`:216-238`).
+  (`src/api/schema.rs:50`, citation unchanged), plugin link/enable/invoke
+  (`:216-237`). `c000681f` ("fix: gate handoff import token on unix") narrowed
+  `live_handoff`'s import path to `#[cfg(unix)]` only
+  (`src/server/headless.rs::handoff_import_token`) rather than adding any
+  peer-identity check — the shared-secret token gate this spike would sit
+  alongside is now explicitly unix-only, which the peer-cred design (also
+  unix-first, see `tasks.md`) should track rather than diverge from.
 
-## Why deferred, not now
+## Sequencing
 
-- It overlaps with and should absorb the narrower fixes already routed
-  (`harden-live-handoff` `import_exe` validation; `spike-plugin-install-api`
-  consent gate) — better designed once those land and reveal the real method-tier
-  boundaries.
-- A capability model touches every method dispatch site; premature design risks
-  churn. Land the point-fixes first, then generalize.
-
-## When to promote
-
-Pick this up after `harden-live-handoff` and `spike-plugin-install-api` land.
-Promotion = write `tasks.md` (peer-cred check first as an independently shippable,
-low-risk increment; then the method-tier design), remove the DEFERRED banner.
+This spike is promoted ahead of its original "land the point-fixes first"
+sequencing, per explicit maintainer request. It should still absorb, not
+duplicate, the narrower fixes running alongside it: `harden-live-handoff`
+already landed the unix-only token gate on the `live_handoff` import path
+(`c000681f`) — the capability-tier design in `tasks.md` treats that as a fixed
+constraint, not something to redesign. `spike-plugin-install-api` is running in
+this same batch and is deciding the `plugin.link`/`plugin.enable` consent gate;
+this spike's method tiering should classify those methods consistent with
+whatever that spike lands, cross-checked explicitly in `tasks.md` step 4 rather
+than assumed.
