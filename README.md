@@ -11,9 +11,9 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-666666?labelColor=333333" alt="Apache 2.0 license" /></a>
-  <a href="https://github.com/ogulcancelik/herdr/releases"><img src="https://img.shields.io/github/downloads/ogulcancelik/herdr/total?labelColor=333333&color=666666" alt="total GitHub release downloads" /></a>
-  <a href="https://github.com/ogulcancelik/herdr/stargazers"><img src="https://img.shields.io/github/stars/ogulcancelik/herdr?labelColor=333333&color=666666&logo=github" alt="GitHub stars" /></a>
-  <a href="https://github.com/ogulcancelik/herdr/releases/latest"><img src="https://img.shields.io/github/v/release/ogulcancelik/herdr?label=release&labelColor=333333&color=666666" alt="latest stable release" /></a>
+  <a href="https://github.com/leonardoacosta/herdr/releases"><img src="https://img.shields.io/github/downloads/leonardoacosta/herdr/total?labelColor=333333&color=666666" alt="total GitHub release downloads" /></a>
+  <a href="https://github.com/leonardoacosta/herdr/stargazers"><img src="https://img.shields.io/github/stars/leonardoacosta/herdr?labelColor=333333&color=666666&logo=github" alt="GitHub stars" /></a>
+  <a href="https://github.com/leonardoacosta/herdr/releases/latest"><img src="https://img.shields.io/github/v/release/leonardoacosta/herdr?label=release&labelColor=333333&color=666666" alt="latest stable release" /></a>
   <a href="https://formulae.brew.sh/formula/herdr"><img src="https://img.shields.io/homebrew/v/herdr?label=homebrew&labelColor=333333&color=666666" alt="Homebrew version" /></a>
   <a href="https://x.com/herdrdev"><img src="https://img.shields.io/badge/follow-%40herdrdev-000000?logo=x&logoColor=white" alt="follow @herdrdev on X" /></a>
 </p>
@@ -39,7 +39,7 @@ https://github.com/user-attachments/assets/043ec09f-4bdd-41d5-aee0-8fda6b83e267
 curl -fsSL https://herdr.dev/install.sh | sh
 ```
 
-or `brew install herdr` · `mise use -g herdr` · windows beta: `powershell -ExecutionPolicy Bypass -c "irm https://herdr.dev/install.ps1 | iex"` · [binaries](https://github.com/ogulcancelik/herdr/releases)
+or `brew install herdr` · `mise use -g herdr` · windows beta: `powershell -ExecutionPolicy Bypass -c "irm https://herdr.dev/install.ps1 | iex"` · [binaries](https://github.com/leonardoacosta/herdr/releases)
 
 then start it where the work lives:
 
@@ -70,13 +70,27 @@ if you are an ai agent helping with this repository, read [`AGENTS.md`](./AGENTS
 ## development
 
 ```bash
-git clone https://github.com/ogulcancelik/herdr
+git clone https://github.com/leonardoacosta/herdr
 cd herdr
 cargo build --release
 
 just test        # unit tests
 just check       # formatting, tests, and maintenance checks
 ```
+
+This repository is maintained from `origin/dev` as the authoritative standalone
+LeonardoAcosta source. It intentionally has no upstream remote or rebase workflow.
+The pinned Zig toolchain is declared in `mise.toml`; release builds run with
+`HTTP_PROXY` and `HTTPS_PROXY` unset.
+
+### Configurable chrome
+
+Desktop clients can opt into `[ui.topbar]` rows and a `[ui.dock]` surface. Topbar
+rows accept the existing sidebar token vocabulary, including `$custom` metadata.
+Plugin pane manifests may use `placement = "dock"`; each workspace admits one
+dock pane, keeps it running across tab switches, and releases the slot when that
+pane closes. With both sections disabled, existing desktop and mobile geometry is
+unchanged.
 
 ## license
 

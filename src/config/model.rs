@@ -4,9 +4,9 @@ use crossterm::event::KeyModifiers;
 use serde::{de, Deserialize, Deserializer, Serialize};
 
 use super::{
-    ActionKeybinds, BindingConfig, CommandKeybindConfig, IndexedKeybind, Keybinds, SidebarConfig,
-    SoundConfig, ThemeConfig, DEFAULT_MOBILE_WIDTH_THRESHOLD, DEFAULT_MOUSE_SCROLL_LINES,
-    DEFAULT_SCROLLBACK_LIMIT_BYTES,
+    ActionKeybinds, BindingConfig, CommandKeybindConfig, DockConfig, IndexedKeybind, Keybinds,
+    SidebarConfig, SoundConfig, ThemeConfig, TopbarConfig, DEFAULT_MOBILE_WIDTH_THRESHOLD,
+    DEFAULT_MOUSE_SCROLL_LINES, DEFAULT_SCROLLBACK_LIMIT_BYTES,
 };
 
 pub const MAX_TOAST_DELAY_SECONDS: u64 = 3600;
@@ -775,6 +775,8 @@ pub struct WorktreesConfig {
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
+    pub topbar: TopbarConfig,
+    pub dock: DockConfig,
     pub sidebar_width: u16,
     /// Minimum sidebar width (columns) when expanded. Default: 18.
     pub sidebar_min_width: u16,
@@ -995,6 +997,8 @@ impl Default for WorktreesConfig {
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
+            topbar: TopbarConfig::default(),
+            dock: DockConfig::default(),
             sidebar_width: 26,
             sidebar_min_width: 18,
             sidebar_max_width: 36,
@@ -1397,6 +1401,31 @@ sidebar_start_collapsed = true
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert!(config.ui.sidebar_start_collapsed);
+    }
+
+    #[test]
+    fn topbar_and_dock_default_off_and_parse_explicit_layout() {
+        let defaults: Config = toml::from_str("").unwrap();
+        assert!(!defaults.ui.topbar.enabled);
+        assert!(!defaults.ui.dock.enabled);
+
+        let config: Config = toml::from_str(
+            r#"
+[ui.topbar]
+enabled = true
+rows = [["workspace", "$model", "$ctx"]]
+
+[ui.dock]
+enabled = true
+side = "bottom"
+size = 12
+"#,
+        )
+        .unwrap();
+        assert!(config.ui.topbar.enabled);
+        assert_eq!(config.ui.topbar.rows.len(), 1);
+        assert!(config.ui.dock.enabled);
+        assert_eq!(config.ui.dock.size, 12);
     }
 
     #[test]

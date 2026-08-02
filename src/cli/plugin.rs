@@ -975,6 +975,7 @@ fn parse_pane_placement(value: &str) -> Option<PluginPanePlacement> {
         "popup" => Some(PluginPanePlacement::Popup),
         "split" => Some(PluginPanePlacement::Split),
         "tab" => Some(PluginPanePlacement::Tab),
+        "dock" => Some(PluginPanePlacement::Dock),
         "zoomed" | "fullscreen" => Some(PluginPanePlacement::Zoomed),
         _ => {
             eprintln!("invalid pane placement: {value}");
@@ -1953,7 +1954,7 @@ fn print_plugin_action_help() {
 
 fn print_plugin_pane_help() {
     eprintln!("herdr plugin pane commands:");
-    eprintln!("  herdr plugin pane open --plugin ID --entrypoint ID [--placement overlay|popup|split|tab|zoomed] [--width SIZE] [--height SIZE] [--workspace ID] [--target-pane PANE] [--direction right|down] [--cwd PATH] [--env KEY=VALUE] [--focus|--no-focus]");
+    eprintln!("  herdr plugin pane open --plugin ID --entrypoint ID [--placement overlay|popup|split|tab|dock|zoomed] [--width SIZE] [--height SIZE] [--workspace ID] [--target-pane PANE] [--direction right|down] [--cwd PATH] [--env KEY=VALUE] [--focus|--no-focus]");
     eprintln!("  herdr plugin pane focus <pane_id>");
     eprintln!("  herdr plugin pane close <pane_id>");
 }
@@ -1961,6 +1962,14 @@ fn print_plugin_pane_help() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dock_is_a_supported_plugin_pane_placement() {
+        assert_eq!(
+            parse_pane_placement("dock"),
+            Some(PluginPanePlacement::Dock)
+        );
+    }
 
     fn unique_plugin_id(label: &str) -> String {
         let nanos = SystemTime::now()

@@ -448,6 +448,7 @@ pub enum PluginPanePlacement {
     Popup,
     Split,
     Tab,
+    Dock,
     Zoomed,
 }
 

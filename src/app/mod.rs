@@ -587,6 +587,8 @@ impl App {
                 agent_panel_entries: Vec::new(),
                 workspace_card_areas: Vec::new(),
                 tab_bar_rect: Rect::default(),
+                topbar_rect: Rect::default(),
+                dock_rect: Rect::default(),
                 tab_hit_areas: Vec::new(),
                 tab_scroll_left_hit_area: Rect::default(),
                 tab_scroll_right_hit_area: Rect::default(),
@@ -643,6 +645,11 @@ impl App {
             pane_gaps: config.ui.pane_gaps,
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
+            topbar_enabled: config.ui.topbar.enabled,
+            topbar_rows: config.ui.topbar.rows.clone(),
+            dock_enabled: config.ui.dock.enabled,
+            dock_side: config.ui.dock.side,
+            dock_size: config.ui.dock.size,
             pane_history_persistence: config.experimental.pane_history,
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
             cjk_ime_agent_filter_configured: !config.experimental.cjk_ime_agents.is_empty(),
@@ -678,6 +685,7 @@ impl App {
             integration_install_messages: Vec::new(),
             installed_plugins: load_plugin_registry(no_session),
             plugin_panes: std::collections::HashMap::new(),
+            dock_panes: std::collections::HashMap::new(),
             pane_graphics_layers: std::collections::HashMap::new(),
             pane_graphics_streams: std::collections::HashMap::new(),
             pane_graphics_revision: 0,
@@ -1451,6 +1459,11 @@ impl App {
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;
                 self.state.hide_tab_bar_when_single_tab = config.ui.hide_tab_bar_when_single_tab;
+                self.state.topbar_enabled = config.ui.topbar.enabled;
+                self.state.topbar_rows = config.ui.topbar.rows.clone();
+                self.state.dock_enabled = config.ui.dock.enabled;
+                self.state.dock_side = config.ui.dock.side;
+                self.state.dock_size = config.ui.dock.size;
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();

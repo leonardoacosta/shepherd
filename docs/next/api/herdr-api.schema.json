@@ -3484,6 +3484,7 @@
             "popup",
             "split",
             "tab",
+            "dock",
             "zoomed"
           ],
           "type": "string"
@@ -8535,6 +8536,7 @@
             "popup",
             "split",
             "tab",
+            "dock",
             "zoomed"
           ],
           "type": "string"

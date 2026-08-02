@@ -127,6 +127,13 @@ impl App {
             };
         if removed {
             // Drop plugin_panes records for this plugin (panes keep running).
+            let pane_ids = self
+                .state
+                .plugin_panes
+                .iter()
+                .filter_map(|(pane_id, record)| (record.plugin_id == plugin_id).then_some(*pane_id))
+                .collect::<Vec<_>>();
+            self.state.remove_plugin_pane_records(pane_ids);
             self.state
                 .plugin_panes
                 .retain(|_, record| record.plugin_id != plugin_id);
@@ -422,7 +429,7 @@ impl App {
                     );
                 }
             }
-            PluginPanePlacement::Tab => {
+            PluginPanePlacement::Tab | PluginPanePlacement::Dock => {
                 if params.target_pane_id.is_some() || params.direction.is_some() {
                     return encode_error(
                         id,
@@ -442,6 +449,7 @@ impl App {
                 self.open_plugin_split_pane(id, params, &plugin, pane, placement)
             }
             PluginPanePlacement::Tab => self.open_plugin_tab(id, params, &plugin, pane),
+            PluginPanePlacement::Dock => self.open_plugin_dock(id, params, &plugin, pane),
         }
     }
 

@@ -1,13 +1,16 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 
+mod dock;
 mod io;
 mod keybinds;
 mod model;
 mod sidebar;
 mod sound;
 mod theme;
+mod topbar;
 
 pub use self::{
+    dock::{DockConfig, DockSide},
     io::{
         config_diagnostic_summary, config_dir, config_path, load_live_config,
         remove_keybinding_config_sections, remove_section_key, state_dir, upsert_section_bool,
@@ -30,6 +33,7 @@ pub use self::{
     },
     sound::SoundConfig,
     theme::{parse_color, CustomThemeColors, ThemeConfig},
+    topbar::TopbarConfig,
 };
 
 pub(crate) use self::io::upsert_top_level_bool;

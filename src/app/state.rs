@@ -17,6 +17,12 @@ pub(crate) struct PluginPaneRecord {
     pub entrypoint: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DockPaneRecord {
+    pub pane_id: PaneId,
+    pub tab_idx: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PaneGraphicsLayer {
     pub format: crate::api::schema::PaneGraphicsFormat,
@@ -778,6 +784,8 @@ pub struct ViewState {
     pub agent_panel_entries: Vec<crate::ui::AgentPanelEntry>,
     pub workspace_card_areas: Vec<WorkspaceCardArea>,
     pub tab_bar_rect: Rect,
+    pub topbar_rect: Rect,
+    pub dock_rect: Rect,
     pub tab_hit_areas: Vec<Rect>,
     pub tab_scroll_left_hit_area: Rect,
     pub tab_scroll_right_hit_area: Rect,
@@ -799,6 +807,8 @@ impl ViewState {
             agent_panel_entries: _,
             workspace_card_areas: _,
             tab_bar_rect: _,
+            topbar_rect: _,
+            dock_rect: _,
             tab_hit_areas: _,
             tab_scroll_left_hit_area: _,
             tab_scroll_right_hit_area: _,
@@ -817,6 +827,8 @@ impl ViewState {
             "agent_panel_entries",
             "workspace_card_areas",
             "tab_bar_rect",
+            "topbar_rect",
+            "dock_rect",
             "tab_hit_areas",
             "tab_scroll_left_hit_area",
             "tab_scroll_right_hit_area",
@@ -1634,6 +1646,11 @@ pub struct AppState {
     pub pane_gaps: bool,
     pub show_agent_labels_on_pane_borders: bool,
     pub hide_tab_bar_when_single_tab: bool,
+    pub topbar_enabled: bool,
+    pub topbar_rows: Vec<Vec<crate::config::AgentSidebarToken>>,
+    pub dock_enabled: bool,
+    pub dock_side: crate::config::DockSide,
+    pub dock_size: u16,
     pub pane_history_persistence: bool,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
     /// the pane requested `?25l`. See `[experimental] reveal_hidden_cursor_for_cjk_ime`.
@@ -1684,6 +1701,7 @@ pub struct AppState {
     pub(crate) installed_plugins: InstalledPluginRegistry,
     /// Pane ids opened through the plugin pane API.
     pub(crate) plugin_panes: std::collections::HashMap<PaneId, PluginPaneRecord>,
+    pub(crate) dock_panes: std::collections::HashMap<String, DockPaneRecord>,
     /// Runtime image layers owned by API clients and composited over panes.
     pub(crate) pane_graphics_layers: std::collections::HashMap<PaneId, PaneGraphicsLayer>,
     /// Active streaming graphics owner token by pane id.
@@ -1898,6 +1916,8 @@ impl AppState {
                 agent_panel_entries: self.view.agent_panel_entries.clone(),
                 workspace_card_areas: self.view.workspace_card_areas.clone(),
                 tab_bar_rect: self.view.tab_bar_rect,
+                topbar_rect: self.view.topbar_rect,
+                dock_rect: self.view.dock_rect,
                 tab_hit_areas: self.view.tab_hit_areas.clone(),
                 tab_scroll_left_hit_area: self.view.tab_scroll_left_hit_area,
                 tab_scroll_right_hit_area: self.view.tab_scroll_right_hit_area,
@@ -1986,6 +2006,8 @@ impl AppState {
                 agent_panel_entries: Vec::new(),
                 workspace_card_areas: Vec::new(),
                 tab_bar_rect: Rect::default(),
+                topbar_rect: Rect::default(),
+                dock_rect: Rect::default(),
                 tab_hit_areas: Vec::new(),
                 tab_scroll_left_hit_area: Rect::default(),
                 tab_scroll_right_hit_area: Rect::default(),
@@ -2042,6 +2064,11 @@ impl AppState {
             pane_gaps: false,
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
+            topbar_enabled: false,
+            topbar_rows: crate::config::TopbarConfig::default().rows,
+            dock_enabled: false,
+            dock_side: crate::config::DockSide::Bottom,
+            dock_size: 10,
             pane_history_persistence: false,
             reveal_hidden_cursor_for_cjk_ime: false,
             cjk_ime_agent_filter_configured: false,
@@ -2086,6 +2113,7 @@ impl AppState {
             integration_install_messages: Vec::new(),
             installed_plugins: std::collections::HashMap::new(),
             plugin_panes: std::collections::HashMap::new(),
+            dock_panes: std::collections::HashMap::new(),
             pane_graphics_layers: std::collections::HashMap::new(),
             pane_graphics_streams: std::collections::HashMap::new(),
             pane_graphics_revision: 0,
@@ -2441,9 +2469,40 @@ impl AppState {
     }
 }
 
+impl AppState {
+    pub(crate) fn reserve_dock_pane(
+        &mut self,
+        workspace_idx: usize,
+        pane_id: PaneId,
+        tab_idx: usize,
+    ) -> Result<(), ()> {
+        let workspace_id = self.workspaces.get(workspace_idx).ok_or(())?.id.clone();
+        if self.dock_panes.contains_key(&workspace_id) {
+            return Err(());
+        }
+        self.dock_panes
+            .insert(workspace_id, DockPaneRecord { pane_id, tab_idx });
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workspace_accepts_only_one_dock_pane_until_cleanup() {
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("dock-test"));
+        let first = PaneId::alloc();
+        let second = PaneId::alloc();
+        assert!(state.reserve_dock_pane(0, first, 0).is_ok());
+        assert!(state.reserve_dock_pane(0, second, 1).is_err());
+        state.remove_plugin_pane_records([first]);
+        assert!(state.reserve_dock_pane(0, second, 1).is_ok());
+    }
     use crossterm::event::KeyEvent;
 
     #[test]
@@ -2681,6 +2740,8 @@ mod tests {
                 "agent_panel_entries",
                 "workspace_card_areas",
                 "tab_bar_rect",
+                "topbar_rect",
+                "dock_rect",
                 "tab_hit_areas",
                 "tab_scroll_left_hit_area",
                 "tab_scroll_right_hit_area",

@@ -6,6 +6,7 @@ use ratatui::{
 };
 
 mod dialogs;
+mod dock;
 mod keybind_help;
 mod menus;
 mod mobile;
@@ -20,12 +21,14 @@ mod status;
 mod tab_surface;
 mod tabs;
 mod text;
+mod topbar;
 mod widgets;
 
 use self::dialogs::{
     render_confirm_close_overlay, render_new_linked_worktree_overlay,
     render_open_existing_worktree_overlay, render_remove_worktree_overlay, render_rename_overlay,
 };
+use self::dock::{render_dock, resize_dock};
 use self::keybind_help::render_keybind_help_overlay;
 use self::menus::{
     render_context_menu, render_copy_mode_overlay, render_global_launcher_menu,
@@ -63,6 +66,7 @@ pub(crate) use self::tab_surface::{
     compute_tab_surface, render_tab_surface, resize_tab_surface, TabSurfaceLayout,
 };
 use self::tabs::render_tab_bar;
+use self::topbar::render_topbar;
 pub(crate) use self::{
     dialogs::{
         confirm_close_button_rects, confirm_close_popup_rect, new_linked_worktree_button_rects,
@@ -226,8 +230,35 @@ fn compute_view_internal(
             .clamp(app.sidebar_min_width, app.sidebar_max_width)
     };
 
+    let [topbar_area, body_area] = if app.topbar_enabled && area.height > 1 {
+        Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area)
+    } else {
+        [Rect::default(), area]
+    };
+
     let [sidebar_area, main_area] =
-        Layout::horizontal([Constraint::Length(sidebar_w), Constraint::Min(1)]).areas(area);
+        Layout::horizontal([Constraint::Length(sidebar_w), Constraint::Min(1)]).areas(body_area);
+
+    let (main_area, dock_area) = if app.dock_enabled {
+        match app.dock_side {
+            crate::config::DockSide::Bottom if main_area.height > 1 => {
+                let size = app.dock_size.min(main_area.height.saturating_sub(1));
+                let [main, dock] = Layout::vertical([Constraint::Min(1), Constraint::Length(size)])
+                    .areas(main_area);
+                (main, dock)
+            }
+            crate::config::DockSide::Right if main_area.width > 1 => {
+                let size = app.dock_size.min(main_area.width.saturating_sub(1));
+                let [main, dock] =
+                    Layout::horizontal([Constraint::Min(1), Constraint::Length(size)])
+                        .areas(main_area);
+                (main, dock)
+            }
+            _ => (main_area, Rect::default()),
+        }
+    } else {
+        (main_area, Rect::default())
+    };
 
     let (tab_bar_rect, terminal_area) = app
         .active
@@ -285,6 +316,7 @@ fn compute_view_internal(
     if resize_panes {
         resize_background_tab_panes_for_desktop(app, terminal_runtimes, main_area, cell_size);
         resize_popup_pane(app, terminal_runtimes, terminal_area, cell_size);
+        resize_dock(app, terminal_runtimes, dock_area, cell_size);
     }
 
     let toast_hit_area = app
@@ -306,6 +338,8 @@ fn compute_view_internal(
         agent_panel_entries,
         workspace_card_areas,
         tab_bar_rect,
+        topbar_rect: topbar_area,
+        dock_rect: dock_area,
         tab_hit_areas: tab_bar_view.tab_hit_areas,
         tab_scroll_left_hit_area: tab_bar_view.scroll_left_hit_area,
         tab_scroll_right_hit_area: tab_bar_view.scroll_right_hit_area,
@@ -370,6 +404,8 @@ fn compute_mobile_view(
         agent_panel_entries: Vec::new(),
         workspace_card_areas: Vec::new(),
         tab_bar_rect: Rect::default(),
+        topbar_rect: Rect::default(),
+        dock_rect: Rect::default(),
         tab_hit_areas: Vec::new(),
         tab_scroll_left_hit_area: Rect::default(),
         tab_scroll_right_hit_area: Rect::default(),
@@ -400,6 +436,8 @@ pub fn render_with_runtime_registry(
     let terminal_area = app.view.terminal_area;
 
     render_navigation_chrome(app, terminal_runtimes, frame);
+    render_topbar(app, frame, app.view.topbar_rect);
+    render_dock(app, terminal_runtimes, frame, app.view.dock_rect);
     if app.view.layout != ViewLayout::Mobile {
         render_tab_bar(app, frame, tab_bar_area);
     }
@@ -986,6 +1024,19 @@ mod tests {
         let backend = TestBackend::new(80, 20);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| render(&app, frame)).unwrap();
+    }
+
+    #[test]
+    fn desktop_topbar_and_bottom_dock_reserve_outer_geometry() {
+        let mut app = AppState::test_new();
+        app.topbar_enabled = true;
+        app.dock_enabled = true;
+        app.dock_side = crate::config::DockSide::Bottom;
+        app.dock_size = 6;
+        compute_view(&mut app, Rect::new(0, 0, 100, 30));
+        assert_eq!(app.view.topbar_rect, Rect::new(0, 0, 100, 1));
+        assert_eq!(app.view.dock_rect, Rect::new(26, 24, 74, 6));
+        assert_eq!(app.view.terminal_area, Rect::new(26, 1, 74, 23));
     }
 
     #[test]

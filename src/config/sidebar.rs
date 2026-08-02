@@ -18,7 +18,7 @@ where
     Ok(rows)
 }
 
-fn validate_sidebar_rows<T>(rows: &[Vec<T>]) -> Result<(), String> {
+pub(crate) fn validate_sidebar_rows<T>(rows: &[Vec<T>]) -> Result<(), String> {
     if rows.len() > MAX_SIDEBAR_ROWS {
         return Err(format!(
             "sidebar layouts may contain at most {MAX_SIDEBAR_ROWS} rows"

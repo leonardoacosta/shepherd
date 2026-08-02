@@ -1656,6 +1656,7 @@ impl AppState {
             self.previous_pane_focus = None;
         }
         for pane_id in pane_ids {
+            self.dock_panes.retain(|_, dock| dock.pane_id != pane_id);
             self.plugin_panes.remove(&pane_id);
             self.pane_graphics_layers.remove(&pane_id);
             self.pane_graphics_streams.remove(&pane_id);
