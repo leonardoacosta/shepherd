@@ -13,6 +13,7 @@ const socketEndpoint =
   process.platform === "win32" && socketPath ? `\\\\.\\pipe\\${socketPath}` : socketPath;
 const paneId = process.env.HERDR_PANE_ID;
 const source = "herdr:pi";
+const workflowLifecycleKey = Symbol.for("pi.workflow.lifecycle.v1");
 
 function enabled() {
   return HERDR_ENV === "1" && !!socketPath && !!paneId;
@@ -59,6 +60,26 @@ type QueuedState = {
   state: AgentState;
   message?: string;
   seq: number;
+};
+
+type WorkflowLifecycleSnapshot = {
+  version: 1;
+  sessionId: string;
+  active: true;
+  command: "apply" | "apply-all";
+  concurrentChanges?: number;
+};
+
+type WorkflowLifecycleProvider = {
+  snapshot: (sessionId: string) => unknown;
+  subscribe: (sessionId: string, onChange: (snapshot: unknown) => void) => unknown;
+};
+
+type WorkflowLifecycleBinding = {
+  provider: WorkflowLifecycleProvider;
+  sessionId: string;
+  ready: boolean;
+  dispose?: () => void;
 };
 
 let reportSeq = Date.now() * 1000;
@@ -183,10 +204,112 @@ export default function (pi) {
   let lastState: AgentState | undefined;
   let lastMessage: string | undefined;
   let rootSession = false;
+  let workflowSnapshot: WorkflowLifecycleSnapshot | undefined;
+  let workflowBinding: WorkflowLifecycleBinding | undefined;
+
+  function validWorkflowSnapshot(
+    value: unknown,
+    sessionId: string,
+  ): value is WorkflowLifecycleSnapshot {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+    const snapshot = value as Partial<WorkflowLifecycleSnapshot>;
+    return (
+      snapshot.version === 1 &&
+      snapshot.sessionId === sessionId &&
+      snapshot.active === true &&
+      (snapshot.command === "apply" || snapshot.command === "apply-all") &&
+      (snapshot.concurrentChanges === undefined ||
+        (Number.isFinite(snapshot.concurrentChanges) &&
+          Number.isInteger(snapshot.concurrentChanges) &&
+          snapshot.concurrentChanges >= 0))
+    );
+  }
+
+  function currentWorkflowProvider(): WorkflowLifecycleProvider | undefined {
+    const provider = (globalThis as any)[workflowLifecycleKey];
+    if (
+      !provider ||
+      typeof provider !== "object" ||
+      typeof provider.snapshot !== "function" ||
+      typeof provider.subscribe !== "function"
+    ) {
+      return undefined;
+    }
+    return provider;
+  }
+
+  function disposeWorkflowBinding(): void {
+    const binding = workflowBinding;
+    workflowBinding = undefined;
+    workflowSnapshot = undefined;
+    try {
+      binding?.dispose?.();
+    } catch {
+      // Workflow lifecycle consumers are fail-open.
+    }
+  }
+
+  function refreshWorkflowSnapshot(binding: WorkflowLifecycleBinding, publish: boolean): void {
+    if (workflowBinding !== binding) {
+      return;
+    }
+    try {
+      const snapshot = binding.provider.snapshot(binding.sessionId);
+      workflowSnapshot = validWorkflowSnapshot(snapshot, binding.sessionId)
+        ? snapshot
+        : undefined;
+    } catch {
+      workflowSnapshot = undefined;
+    }
+    if (publish) {
+      publishState();
+    }
+  }
+
+  function bindWorkflowLifecycle(): void {
+    disposeWorkflowBinding();
+    const provider = currentWorkflowProvider();
+    const sessionId = currentAgentSessionId;
+    if (!provider || !sessionId) {
+      return;
+    }
+
+    const binding: WorkflowLifecycleBinding = { provider, sessionId, ready: false };
+    workflowBinding = binding;
+    try {
+      const dispose = provider.subscribe(sessionId, () => {
+        if (binding.ready) {
+          refreshWorkflowSnapshot(binding, true);
+        }
+      });
+      if (typeof dispose !== "function") {
+        disposeWorkflowBinding();
+        return;
+      }
+      binding.dispose = dispose;
+      binding.ready = true;
+      refreshWorkflowSnapshot(binding, false);
+    } catch {
+      disposeWorkflowBinding();
+    }
+  }
+
+  function workflowMessage(snapshot: WorkflowLifecycleSnapshot): string {
+    const count =
+      snapshot.concurrentChanges === undefined
+        ? ""
+        : ` · ${snapshot.concurrentChanges} changes`;
+    return `Pi · /${snapshot.command}${count}`;
+  }
 
   function desiredState() {
     if (blockedCount > 0) {
       return { state: "blocked" as const, message: blockedMessage };
+    }
+    if (workflowSnapshot) {
+      return { state: "working" as const, message: workflowMessage(workflowSnapshot) };
     }
     if (agentActive) {
       return { state: "working" as const, message: undefined };
@@ -212,6 +335,10 @@ export default function (pi) {
       blockedCount = Math.max(0, blockedCount - 1);
       if (blockedCount === 0) {
         blockedMessage = undefined;
+        if (workflowBinding) {
+          refreshWorkflowSnapshot(workflowBinding, true);
+          return;
+        }
       }
       publishState();
       return;
@@ -229,6 +356,7 @@ export default function (pi) {
     rootSession = true;
     updateSessionRef(ctx);
     await reportSession(event?.reason);
+    bindWorkflowLifecycle();
     // A reload can replace this extension mid-run without emitting another agent_start.
     agentActive = ctx?.isIdle?.() === false;
     publishState(true);
@@ -251,5 +379,13 @@ export default function (pi) {
 
     agentActive = false;
     publishState();
+  });
+
+  pi.on("session_shutdown", () => {
+    if (!rootSession) {
+      return;
+    }
+    rootSession = false;
+    disposeWorkflowBinding();
   });
 }

@@ -2669,7 +2669,7 @@ fn bundled_integration_assets_report_session_refs() {
     assert!(PI_EXTENSION_ASSET.contains("pane.report_agent\""));
     assert!(PI_EXTENSION_ASSET.contains("pi.on(\"agent_start\""));
     assert!(PI_EXTENSION_ASSET.contains("pi.on(\"agent_settled\""));
-    assert!(!PI_EXTENSION_ASSET.contains("pi.on(\"session_shutdown\""));
+    assert!(PI_EXTENSION_ASSET.contains("pi.on(\"session_shutdown\""));
     assert!(OMP_EXTENSION_ASSET.contains("agent_session_path"));
     assert!(OMP_EXTENSION_ASSET.contains("agent_session_id"));
     assert!(OMP_EXTENSION_ASSET.contains("ctx?.hasUI !== true"));

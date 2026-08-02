@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 const originalPlatform = process.platform;
 const originalCreateConnection = net.createConnection;
+const workflowLifecycleKey = Symbol.for("pi.workflow.lifecycle.v1");
 const originalEnvironment = {
   HERDR_ENV: process.env.HERDR_ENV,
   HERDR_OMP_IDLE_DEBOUNCE_MS: process.env.HERDR_OMP_IDLE_DEBOUNCE_MS,
@@ -34,6 +35,7 @@ afterEach(async () => {
 
   Object.defineProperty(process, "platform", { value: originalPlatform });
   net.createConnection = originalCreateConnection;
+  delete (globalThis as any)[workflowLifecycleKey];
   for (const [name, value] of Object.entries(originalEnvironment)) {
     if (value === undefined) {
       delete process.env[name];
@@ -283,6 +285,255 @@ test("Pi settlement preserves explicit blocked-state precedence", async () => {
   expect(requestStates(requests)).toEqual(["idle", "working", "blocked", "idle"]);
 });
 
+test("Pi projects an active root workflow through a fixed bounded label", async () => {
+  const requests = await startRecordingServer("pi-workflow-active");
+  const { handlers, pi } = createExtensionHarness();
+  (globalThis as any)[workflowLifecycleKey] = {
+    snapshot: (sessionId: string) => ({
+      version: 1,
+      sessionId,
+      active: true,
+      command: "apply-all",
+      concurrentChanges: 2,
+      task: "must not leak",
+    }),
+    subscribe: () => () => {},
+  };
+
+  const { default: install } = await importFresh("./pi/herdr-agent-state.ts");
+  install(pi);
+  await handlers.get("session_start")?.(
+    { reason: "startup" },
+    piContextWithSession("pi-root", () => true),
+  );
+  await waitFor(() => requestReports(requests).length === 1);
+
+  expect(requestReports(requests)).toEqual([
+    { state: "working", message: "Pi · /apply-all · 2 changes" },
+  ]);
+});
+
+test("Pi keeps an explicit block authoritative and reconciles the fresh workflow on unblock", async () => {
+  const requests = await startRecordingServer("pi-workflow-blocked");
+  const { eventHandlers, handlers, pi } = createExtensionHarness();
+  let snapshot: unknown = {
+    version: 1,
+    sessionId: "pi-root",
+    active: true,
+    command: "apply",
+  };
+  let notify = () => {};
+  (globalThis as any)[workflowLifecycleKey] = {
+    snapshot: () => snapshot,
+    subscribe: (_sessionId: string, onChange: () => void) => {
+      notify = onChange;
+      return () => {};
+    },
+  };
+
+  const { default: install } = await importFresh("./pi/herdr-agent-state.ts");
+  install(pi);
+  const context = piContextWithSession("pi-root", () => true);
+  await handlers.get("session_start")?.({ reason: "startup" }, context);
+  await waitFor(() => requestReports(requests).length === 1);
+  eventHandlers.get("herdr:blocked")?.({ active: true, label: "approval" }, context);
+  await waitFor(() => requestReports(requests).length === 2);
+
+  snapshot = {
+    version: 1,
+    sessionId: "pi-root",
+    active: true,
+    command: "apply",
+    concurrentChanges: 4,
+  };
+  notify();
+  await Bun.sleep(25);
+  expect(requestReports(requests)).toEqual([
+    { state: "working", message: "Pi · /apply" },
+    { state: "blocked", message: "approval" },
+  ]);
+
+  eventHandlers.get("herdr:blocked")?.({ active: false }, context);
+  await waitFor(() => requestReports(requests).length === 3);
+  expect(requestReports(requests).at(-1)).toEqual({
+    state: "working",
+    message: "Pi · /apply · 4 changes",
+  });
+});
+
+test("Pi fails open for invalid or throwing workflow snapshots", async () => {
+  const requests = await startRecordingServer("pi-workflow-invalid");
+  const { handlers, pi } = createExtensionHarness();
+  let snapshot: () => unknown = () => ({
+    version: 1,
+    sessionId: "foreign-root",
+    active: true,
+    command: "apply-all",
+  });
+  let notify = () => {};
+  (globalThis as any)[workflowLifecycleKey] = {
+    snapshot: () => snapshot(),
+    subscribe: (_sessionId: string, onChange: () => void) => {
+      notify = onChange;
+      return () => {};
+    },
+  };
+
+  const { default: install } = await importFresh("./pi/herdr-agent-state.ts");
+  install(pi);
+  await handlers.get("session_start")?.(
+    { reason: "startup" },
+    piContextWithSession("pi-root", () => false),
+  );
+  await waitFor(() => requestReports(requests).length === 1);
+  expect(requestReports(requests)).toEqual([{ state: "working", message: undefined }]);
+
+  snapshot = () => ({
+    version: 1,
+    sessionId: "pi-root",
+    active: true,
+    command: "apply-all",
+  });
+  notify();
+  await waitFor(() => requestReports(requests).length === 2);
+  expect(requestReports(requests).at(-1)).toEqual({
+    state: "working",
+    message: "Pi · /apply-all",
+  });
+
+  snapshot = () => {
+    throw new Error("bridge reloaded");
+  };
+  notify();
+  await waitFor(() => requestReports(requests).length === 3);
+  expect(requestReports(requests).at(-1)).toEqual({ state: "working", message: undefined });
+});
+
+test("Pi reload rebinds the exact root session and disposes the stale subscription", async () => {
+  const requests = await startRecordingServer("pi-workflow-reload");
+  const { handlers, pi } = createExtensionHarness();
+  let staleNotify = () => {};
+  let staleDisposeCount = 0;
+  (globalThis as any)[workflowLifecycleKey] = {
+    snapshot: () => ({
+      version: 1,
+      sessionId: "pi-root",
+      active: true,
+      command: "apply",
+    }),
+    subscribe: (_sessionId: string, onChange: () => void) => {
+      staleNotify = onChange;
+      return () => {
+        staleDisposeCount += 1;
+      };
+    },
+  };
+
+  const { default: install } = await importFresh("./pi/herdr-agent-state.ts");
+  install(pi);
+  const context = piContextWithSession("pi-root", () => true);
+  await handlers.get("session_start")?.({ reason: "startup" }, context);
+  await waitFor(() => requestReports(requests).length === 1);
+
+  (globalThis as any)[workflowLifecycleKey] = {
+    snapshot: () => ({
+      version: 1,
+      sessionId: "pi-root",
+      active: true,
+      command: "apply-all",
+      concurrentChanges: 3,
+    }),
+    subscribe: () => () => {},
+  };
+  await handlers.get("session_start")?.({ reason: "reload" }, context);
+  await waitFor(() => requestReports(requests).length === 2);
+  expect(staleDisposeCount).toBe(1);
+  expect(requestReports(requests).at(-1)).toEqual({
+    state: "working",
+    message: "Pi · /apply-all · 3 changes",
+  });
+
+  staleNotify();
+  await Bun.sleep(25);
+  expect(requestReports(requests)).toHaveLength(2);
+});
+
+test("Pi session shutdown disposes the workflow binding and ignores stale updates", async () => {
+  const requests = await startRecordingServer("pi-workflow-shutdown");
+  const { handlers, pi } = createExtensionHarness();
+  let staleNotify = () => {};
+  let disposeCount = 0;
+  (globalThis as any)[workflowLifecycleKey] = {
+    snapshot: () => ({
+      version: 1,
+      sessionId: "pi-root",
+      active: true,
+      command: "apply-all",
+    }),
+    subscribe: (_sessionId: string, onChange: () => void) => {
+      staleNotify = onChange;
+      return () => {
+        disposeCount += 1;
+      };
+    },
+  };
+
+  const { default: install } = await importFresh("./pi/herdr-agent-state.ts");
+  install(pi);
+  const context = piContextWithSession("pi-root", () => true);
+  await handlers.get("session_start")?.({ reason: "startup" }, context);
+  await waitFor(() => requestReports(requests).length === 1);
+
+  const shutdown = handlers.get("session_shutdown");
+  expect(shutdown).toBeDefined();
+  await shutdown?.({ reason: "reload" }, context);
+  await shutdown?.({ reason: "reload" }, context);
+  expect(disposeCount).toBe(1);
+
+  staleNotify();
+  await Bun.sleep(25);
+  expect(requestReports(requests)).toEqual([
+    { state: "working", message: "Pi · /apply-all" },
+  ]);
+});
+
+test("Pi clears a terminal workflow label exactly once", async () => {
+  const requests = await startRecordingServer("pi-workflow-terminal");
+  const { handlers, pi } = createExtensionHarness();
+  let snapshot: unknown = {
+    version: 1,
+    sessionId: "pi-root",
+    active: true,
+    command: "apply-all",
+  };
+  let notify = () => {};
+  (globalThis as any)[workflowLifecycleKey] = {
+    snapshot: () => snapshot,
+    subscribe: (_sessionId: string, onChange: () => void) => {
+      notify = onChange;
+      return () => {};
+    },
+  };
+
+  const { default: install } = await importFresh("./pi/herdr-agent-state.ts");
+  install(pi);
+  await handlers.get("session_start")?.(
+    { reason: "startup" },
+    piContextWithSession("pi-root", () => true),
+  );
+  await waitFor(() => requestReports(requests).length === 1);
+
+  snapshot = undefined;
+  notify();
+  notify();
+  await waitFor(() => requestReports(requests).length === 2);
+  await Bun.sleep(25);
+  expect(requestReports(requests)).toEqual([
+    { state: "working", message: "Pi · /apply-all" },
+    { state: "idle", message: undefined },
+  ]);
+});
+
 test("Pi reports the session replacement source", async () => {
   const requests = await startRecordingServer("pi-session-source");
   const { handlers, pi } = createExtensionHarness();
@@ -519,6 +770,26 @@ function piContext(isIdle: () => boolean) {
       getSessionId: () => undefined,
     },
   };
+}
+
+function piContextWithSession(sessionId: string, isIdle: () => boolean) {
+  return {
+    hasUI: true,
+    isIdle,
+    sessionManager: {
+      getSessionFile: () => undefined,
+      getSessionId: () => sessionId,
+    },
+  };
+}
+
+function requestReports(requests: unknown[]): Array<{ state: unknown; message: unknown }> {
+  return requests
+    .filter((request) => isRecord(request) && request.method === "pane.report_agent")
+    .map((request) => {
+      const params = isRecord(request) && isRecord(request.params) ? request.params : {};
+      return { state: params.state, message: params.message };
+    });
 }
 
 function requestStates(requests: unknown[]): unknown[] {
