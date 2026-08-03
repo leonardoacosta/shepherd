@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 const PLUGIN_CONFIG_PATH_COMPONENT_MAX_CHARS: usize = 120;
 
@@ -31,34 +31,7 @@ pub(crate) fn ensure_plugin_user_dirs(plugin_id: &str) -> std::io::Result<()> {
 }
 
 fn ensure_plugin_config_dir(plugin_id: &str) -> std::io::Result<()> {
-    let config_dir = plugin_config_dir(plugin_id);
-    if config_dir.exists() {
-        return std::fs::create_dir_all(config_dir);
-    }
-    if let Some(legacy_dir) = legacy_plugin_config_dirs(plugin_id)
-        .into_iter()
-        .find(|path| path.is_dir())
-    {
-        copy_dir_all(&legacy_dir, &config_dir)?;
-        return Ok(());
-    }
-    std::fs::create_dir_all(config_dir)
-}
-
-fn legacy_plugin_config_dirs(plugin_id: &str) -> Vec<PathBuf> {
-    let plugins_dir = managed_plugins_dir();
-    let old_unhashed =
-        (!matches!(plugin_id, "config" | "github")).then(|| plugins_dir.join(plugin_id));
-    let current_hashed =
-        plugins_dir.join(crate::api::schema::plugin_managed_path_component(plugin_id));
-    let mut candidates = Vec::new();
-    if let Some(old_unhashed) = old_unhashed {
-        if old_unhashed != current_hashed {
-            candidates.push(old_unhashed);
-        }
-    }
-    candidates.push(current_hashed);
-    candidates
+    std::fs::create_dir_all(plugin_config_dir(plugin_id))
 }
 
 fn plugin_config_path_component(value: &str) -> String {
@@ -89,21 +62,6 @@ fn plugin_config_path_component(value: &str) -> String {
         return format!("{prefix}-{hash}");
     }
     component
-}
-
-fn copy_dir_all(source: &Path, destination: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(destination)?;
-    for entry in std::fs::read_dir(source)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let destination_path = destination.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_dir_all(&entry.path(), &destination_path)?;
-        } else {
-            std::fs::copy(entry.path(), destination_path)?;
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]

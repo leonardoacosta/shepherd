@@ -127,7 +127,7 @@ mod tests {
             .unwrap_or(0);
         std::env::temp_dir()
             .join(format!(
-                "herdr-registry-{name}-{}-{nanos}",
+                "shepherd-registry-{name}-{}-{nanos}",
                 std::process::id()
             ))
             .join("plugins.json")
@@ -138,9 +138,9 @@ mod tests {
             plugin_id: id.to_string(),
             name: "Test Plugin".to_string(),
             version: "0.1.0".to_string(),
-            min_herdr_version: crate::build_info::BASE_VERSION.to_string(),
+            min_shepherd_version: crate::build_info::BASE_VERSION.to_string(),
             description: None,
-            manifest_path: format!("/tmp/{id}/herdr-plugin.toml"),
+            manifest_path: format!("/tmp/{id}/shepherd-plugin.toml"),
             plugin_root: format!("/tmp/{id}"),
             enabled: true,
             platforms: None,
@@ -185,7 +185,7 @@ mod tests {
     "plugin_id": "example.legacy",
     "name": "Legacy Plugin",
     "version": "0.1.0",
-    "manifest_path": "/tmp/example.legacy/herdr-plugin.toml",
+    "manifest_path": "/tmp/example.legacy/shepherd-plugin.toml",
     "plugin_root": "/tmp/example.legacy",
     "enabled": true
   }
@@ -196,7 +196,7 @@ mod tests {
         let loaded = load_from_path_strict(&path).unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].plugin_id, "example.legacy");
-        assert_eq!(loaded[0].min_herdr_version, "");
+        assert_eq!(loaded[0].min_shepherd_version, "");
         assert_eq!(
             loaded[0].source,
             crate::api::schema::PluginSourceInfo::default()
@@ -252,11 +252,11 @@ mod tests {
         entry.source = crate::api::schema::PluginSourceInfo {
             kind: crate::api::schema::PluginSourceKind::Github,
             owner: Some("ogulcancelik".into()),
-            repo: Some("herdr-plugin-examples".into()),
+            repo: Some("shepherd-plugin-examples".into()),
             subdir: Some("worktree-bootstrap".into()),
             requested_ref: Some("main".into()),
             resolved_commit: Some("abc123".into()),
-            managed_path: Some("/tmp/herdr/plugins/github/example.reload".into()),
+            managed_path: Some("/tmp/shepherd/plugins/github/example.reload".into()),
             installed_unix_ms: Some(42),
         };
 
@@ -265,9 +265,9 @@ mod tests {
                 plugin_id: "example.reload".to_string(),
                 name: "Fresh Name".to_string(),
                 version: "0.2.0".to_string(),
-                min_herdr_version: crate::build_info::BASE_VERSION.to_string(),
+                min_shepherd_version: crate::build_info::BASE_VERSION.to_string(),
                 description: Some("refreshed".to_string()),
-                manifest_path: "/tmp/example.reload/herdr-plugin.toml".to_string(),
+                manifest_path: "/tmp/example.reload/shepherd-plugin.toml".to_string(),
                 plugin_root: "/tmp/example.reload".to_string(),
                 enabled: true, // caller would pass stored enabled; fresh parse returns true
                 platforms: None,

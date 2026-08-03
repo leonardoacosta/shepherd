@@ -20,9 +20,9 @@ const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
 
 pub fn app_dir_name() -> &'static str {
     if cfg!(debug_assertions) {
-        "herdr-dev"
+        "shepherd-dev"
     } else {
-        "herdr"
+        "shepherd"
     }
 }
 
@@ -212,7 +212,7 @@ pub fn config_diagnostic_summary(diagnostics: &[String]) -> Option<String> {
         ""
     };
 
-    Some(format!("{target}{impact}; herdr config check"))
+    Some(format!("{target}{impact}; shepherd config check"))
 }
 
 pub fn load_live_config() -> Result<LoadedConfig, Vec<String>> {
@@ -714,6 +714,100 @@ fn upsert_section_raw(content: &str, section: &str, key: &str, value: &str) -> S
 mod tests {
     use super::*;
 
+    struct EnvRestore {
+        values: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl EnvRestore {
+        fn set(&mut self, name: &'static str, value: impl AsRef<std::ffi::OsStr>) {
+            self.values.push((name, std::env::var_os(name)));
+            std::env::set_var(name, value);
+        }
+
+        fn remove(&mut self, name: &'static str) {
+            self.values.push((name, std::env::var_os(name)));
+            std::env::remove_var(name);
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (name, value) in self.values.drain(..).rev() {
+                if let Some(value) = value {
+                    std::env::set_var(name, value);
+                } else {
+                    std::env::remove_var(name);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shepherd_paths_ignore_conflicting_legacy_roots_and_overrides() {
+        let _lock = crate::config::test_config_env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let root = std::env::temp_dir().join(format!(
+            "shepherd-path-isolation-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock after unix epoch")
+                .as_nanos()
+        ));
+        let legacy_config = root
+            .join("config")
+            .join(concat!("he", "rdr-dev"))
+            .join("config.toml");
+        let legacy_state = root
+            .join("state")
+            .join(concat!("he", "rdr-dev"))
+            .join("legacy-state");
+        let shepherd_config = root.join("shepherd-config.toml");
+        let legacy_socket = root.join(concat!("he", "rdr.sock"));
+        let shepherd_socket = root.join("shepherd.sock");
+        std::fs::create_dir_all(legacy_config.parent().expect("config parent"))
+            .expect("create legacy config root");
+        std::fs::create_dir_all(legacy_state.parent().expect("state parent"))
+            .expect("create legacy state root");
+        std::fs::write(&legacy_config, "onboarding = false\n").expect("write legacy sentinel");
+        std::fs::write(&legacy_state, "legacy state").expect("write legacy state sentinel");
+        std::fs::write(&shepherd_config, "onboarding = true\n").expect("write shepherd config");
+
+        let mut env = EnvRestore { values: Vec::new() };
+        env.set("XDG_CONFIG_HOME", root.join("config"));
+        env.set("XDG_STATE_HOME", root.join("state"));
+        env.set(concat!("HE", "RDR_CONFIG_PATH"), &legacy_config);
+        env.set("SHEPHERD_CONFIG_PATH", &shepherd_config);
+        env.set(concat!("HE", "RDR_SOCKET_PATH"), &legacy_socket);
+        env.set("SHEPHERD_SOCKET_PATH", &shepherd_socket);
+        env.remove(crate::session::SESSION_ENV_VAR);
+        crate::session::clear_explicit_session_for_test();
+
+        let app_dir = if cfg!(debug_assertions) {
+            "shepherd-dev"
+        } else {
+            "shepherd"
+        };
+        assert_eq!(config_dir(), root.join("config").join(app_dir));
+        assert_eq!(state_dir(), root.join("state").join(app_dir));
+        assert!(!state_dir().join("legacy-state").exists());
+        assert_eq!(config_path(), shepherd_config);
+        assert!(Config::load().config.should_show_onboarding());
+        assert_eq!(crate::session::active_api_socket_path(), shepherd_socket);
+        assert_eq!(
+            std::fs::read_to_string(&legacy_config).expect("read legacy config sentinel"),
+            "onboarding = false\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&legacy_state).expect("read legacy state sentinel"),
+            "legacy state"
+        );
+        assert!(!legacy_socket.exists());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn upsert_top_level_bool_replaces_existing_value() {
         let content = "onboarding = true\n[keys]\nprefix = \"ctrl+b\"\n";
@@ -732,10 +826,10 @@ mod tests {
     #[test]
     fn remove_section_key_removes_matching_key_from_section() {
         let content =
-            "[ui.toast]\nenabled = true\ndelivery = \"herdr\"\n[ui.sound]\nenabled = true\n";
+            "[ui.toast]\nenabled = true\ndelivery = \"shepherd\"\n[ui.sound]\nenabled = true\n";
         let updated = remove_section_key(content, "ui.toast", "enabled");
         assert!(!updated.contains("[ui.toast]\nenabled = true"));
-        assert!(updated.contains("delivery = \"herdr\""));
+        assert!(updated.contains("delivery = \"shepherd\""));
         assert!(updated.contains("[ui.sound]\nenabled = true"));
     }
 
@@ -751,7 +845,7 @@ mod tests {
 
         assert_eq!(
             config_diagnostic_summary(&diagnostics).as_deref(),
-            Some("config.toml; herdr config check")
+            Some("config.toml; shepherd config check")
         );
     }
 
@@ -764,7 +858,7 @@ mod tests {
 
         assert_eq!(
             config_diagnostic_summary(&diagnostics).as_deref(),
-            Some("config.toml has unknown keys; herdr config check")
+            Some("config.toml has unknown keys; shepherd config check")
         );
     }
 
@@ -777,7 +871,7 @@ mod tests {
 
         assert_eq!(
             config_diagnostic_summary(&diagnostics).as_deref(),
-            Some("config.toml; herdr config check")
+            Some("config.toml; shepherd config check")
         );
     }
 
@@ -790,7 +884,7 @@ mod tests {
 
         assert_eq!(
             config_diagnostic_summary(&diagnostics).as_deref(),
-            Some("config.toml invalid; using defaults; herdr config check")
+            Some("config.toml invalid; using defaults; shepherd config check")
         );
     }
 
@@ -799,14 +893,14 @@ mod tests {
         let startup = vec!["config read error: permission denied; using defaults".to_string()];
         assert_eq!(
             config_diagnostic_summary(&startup).as_deref(),
-            Some("config.toml unreadable; using defaults; herdr config check")
+            Some("config.toml unreadable; using defaults; shepherd config check")
         );
 
         let reload =
             vec!["config read error: permission denied; keeping current config".to_string()];
         assert_eq!(
             config_diagnostic_summary(&reload).as_deref(),
-            Some("config.toml unreadable; keeping current config; herdr config check")
+            Some("config.toml unreadable; keeping current config; shepherd config check")
         );
     }
 
@@ -819,7 +913,7 @@ mod tests {
 
         assert_eq!(
             config_diagnostic_summary(&diagnostics).as_deref(),
-            Some("config.toml invalid; keeping current config; herdr config check")
+            Some("config.toml invalid; keeping current config; shepherd config check")
         );
     }
 
@@ -829,7 +923,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let path =
-            std::env::temp_dir().join(format!("herdr-config-unreadable-{}", std::process::id()));
+            std::env::temp_dir().join(format!("shepherd-config-unreadable-{}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         std::env::set_var(CONFIG_PATH_ENV_VAR, &path);
 
@@ -873,7 +967,7 @@ resume_agents_on_restore = true
 delivery = "system"
 
 [ui.toast]
-delivery = "herdr"
+delivery = "shepherd"
 "#,
         )
         .unwrap();
@@ -885,7 +979,7 @@ delivery = "herdr"
         assert!(loaded.invalid_sections.is_empty());
         assert_eq!(
             loaded.config.ui.toast.delivery,
-            super::super::ToastDelivery::Herdr
+            super::super::ToastDelivery::Shepherd
         );
     }
 
@@ -944,7 +1038,7 @@ claude = [["terminal_title"]]
         assert!(!loaded.config.ui.mouse_capture);
         assert_eq!(
             loaded.config.ui.toast.delivery,
-            super::super::ToastDelivery::Herdr
+            super::super::ToastDelivery::Shepherd
         );
         assert!(loaded
             .config
@@ -978,7 +1072,7 @@ mouse_captur = true
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let path = std::env::temp_dir().join(format!(
-            "herdr-config-unknown-section-{}.toml",
+            "shepherd-config-unknown-section-{}.toml",
             std::process::id()
         ));
         std::fs::write(

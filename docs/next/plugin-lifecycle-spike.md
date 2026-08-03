@@ -6,7 +6,7 @@ Scope: design spike for a plugin upgrade / drift path (openspec `spike-plugin-li
 
 ## What shipped in this spike
 
-`herdr plugin outdated [--plugin ID] [--json]` — a read-only, user-invoked drift
+`shepherd plugin outdated [--plugin ID] [--json]` — a read-only, user-invoked drift
 report. It never fetches plugin code, never checks anything out, and never runs a
 plugin command. Per installed plugin it runs exactly one
 `git ls-remote -- <remote> <ref>` and compares the returned SHA against the
@@ -56,14 +56,14 @@ entry wins, because install resolves to the commit.
 
 ### Option A — conservative: `outdated` only (recommended)
 
-Herdr reports drift; the user re-runs `herdr plugin install <owner>/<repo>[/subdir]`
+Shepherd reports drift; the user re-runs `shepherd plugin install <owner>/<repo>[/subdir]`
 when they want it. Install already prints a full preview (actions, startup
 commands, event hooks, panes, build commands) and requires confirmation, so every
 new line of third-party code that gains execution rights passes a human eye.
 
 ### Option B — expansive: opt-in auto-update
 
-A user opts a plugin (or all plugins) into automatic upgrade; Herdr periodically
+A user opts a plugin (or all plugins) into automatic upgrade; Shepherd periodically
 checks and pulls new upstream commits.
 
 ### The tradeoff that decides it
@@ -73,13 +73,13 @@ marketplace index is an unreviewed GitHub topic-search cache — inclusion means
 repo carries a topic, not that anyone vetted it — and it carries no version or
 commit anyway. Auto-update therefore means *auto-pulling arbitrary new upstream
 commits with zero review gate*, on plugins whose manifests declare `startup`
-commands, event hooks, and build commands that Herdr executes. A plugin author
+commands, event hooks, and build commands that Shepherd executes. A plugin author
 losing their GitHub account, or shipping one bad commit, converts silently into
 code execution on every machine that installed it. Today the blast radius of a
 compromised upstream is bounded by the user choosing to reinstall; auto-update
 removes that bound.
 
-The `min_herdr_version` check (`src/app/api/plugins/manifest.rs`) does not help
+The `min_shepherd_version` check (`src/app/api/plugins/manifest.rs`) does not help
 here — it gates compatibility, not trust.
 
 ### Recommendation

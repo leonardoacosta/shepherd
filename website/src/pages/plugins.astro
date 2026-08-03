@@ -2,7 +2,7 @@
 import MarketingLayout from '../components/MarketingLayout.astro';
 import fixture from '../data/plugins-fixture.json';
 
-const snapshotUrl = 'https://assets.herdr.dev/plugins/index.json';
+const snapshotUrl = 'https://assets.shepherd.dev/plugins/index.json';
 
 // Seed the page server-side from the public R2 snapshot so `bun run dev` and
 // the production build both render real data immediately. If the live fetch
@@ -21,22 +21,22 @@ const apiUrl = import.meta.env.DEV ? null : snapshotUrl;
 ---
 
 <MarketingLayout
-  title="Herdr plugins: community plugin marketplace"
-  description="Discover community Herdr plugins published on GitHub. An automatic index of public repositories tagged with the herdr-plugin topic."
+  title="Shepherd plugins: community plugin marketplace"
+  description="Discover community Shepherd plugins published on GitHub. An automatic index of public repositories tagged with the shepherd-plugin topic."
   canonicalPath="/plugins/"
 >
   <main class="plugins-page">
     <section class="section plugins-hero">
       <p class="section-kicker"># marketplace</p>
-      <h2>Plugins built on Herdr.</h2>
+      <h2>Plugins built on Shepherd.</h2>
       <p class="plugins-lede">
         Community plugins published on GitHub. Install any of them with
-        <code>herdr plugin install</code>, or publish your own and get listed.
+        <code>shepherd plugin install</code>, or publish your own and get listed.
       </p>
       <p class="plugins-trust">
         <span class="status-dot dot-idle"></span>
         Listings are discovered automatically from the GitHub topic
-        <code>herdr-plugin</code>. They are not reviewed by Herdr, so install at
+        <code>shepherd-plugin</code>. They are not reviewed by Shepherd, so install at
         your own discretion. <a href="/docs/plugins/#trust-and-security">Trust guidance</a>.
       </p>
     </section>
@@ -77,8 +77,8 @@ const apiUrl = import.meta.env.DEV ? null : snapshotUrl;
         <p class="section-kicker"># publish</p>
         <h3>Want your plugin listed?</h3>
         <p>
-          Add the GitHub topic <code>herdr-plugin</code> to a public repository
-          with a <code>herdr-plugin.toml</code> manifest. The index picks it up
+          Add the GitHub topic <code>shepherd-plugin</code> to a public repository
+          with a <code>shepherd-plugin.toml</code> manifest. The index picks it up
           on the next refresh. No submission, no review queue.
         </p>
         <div class="plugins-publish-actions">

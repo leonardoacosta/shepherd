@@ -327,7 +327,7 @@ fn compute_view_internal(
                 area,
                 toast,
                 app.config_diagnostic.is_some(),
-                toast.position.unwrap_or(app.toast_config.herdr.position),
+                toast.position.unwrap_or(app.toast_config.shepherd.position),
             )
         })
         .unwrap_or_default();
@@ -531,14 +531,14 @@ fn render_notifications(app: &AppState, frame: &mut Frame, terminal_area: Rect) 
                 frame.area(),
                 toast,
                 has_config_diagnostic,
-                toast.position.unwrap_or(app.toast_config.herdr.position),
+                toast.position.unwrap_or(app.toast_config.shepherd.position),
                 &app.palette,
             );
             toast_rect = Some(toast_notification_rect(
                 frame.area(),
                 toast,
                 has_config_diagnostic,
-                toast.position.unwrap_or(app.toast_config.herdr.position),
+                toast.position.unwrap_or(app.toast_config.shepherd.position),
             ));
         }
         if app.view.layout == ViewLayout::Mobile {
@@ -647,7 +647,7 @@ mod tests {
             area,
             &toast,
             false,
-            crate::config::ToastHerdrPosition::BottomRight,
+            crate::config::ToastShepherdPosition::BottomRight,
         );
         assert_eq!(
             copy_feedback_offset_for_toast(
@@ -761,7 +761,7 @@ mod tests {
         app.active = Some(0);
         app.selected = 0;
         app.mode = Mode::Terminal;
-        app.config_diagnostic = Some("config.toml:100:10; herdr config check".into());
+        app.config_diagnostic = Some("config.toml:100:10; shepherd config check".into());
 
         let area = Rect::new(0, 0, 44, 20);
         compute_view(&mut app, area);
@@ -770,7 +770,7 @@ mod tests {
         let row = buffer_row_text(terminal.backend().buffer(), area, app.view.terminal_area.y);
 
         assert!(row.contains("config.toml:100:10"), "{row}");
-        assert!(row.contains("herdr config check"), "{row}");
+        assert!(row.contains("shepherd config check"), "{row}");
     }
 
     #[test]
@@ -780,7 +780,7 @@ mod tests {
         app.active = Some(0);
         app.selected = 0;
         app.mode = Mode::Terminal;
-        app.toast_config.herdr.position = crate::config::ToastHerdrPosition::TopLeft;
+        app.toast_config.shepherd.position = crate::config::ToastShepherdPosition::TopLeft;
         app.toast = Some(crate::app::state::ToastNotification {
             kind: crate::app::state::ToastKind::Finished,
             title: "pi finished".into(),
@@ -805,7 +805,7 @@ mod tests {
         app.selected = 0;
         app.mode = Mode::Terminal;
         app.config_diagnostic = Some("config warning".into());
-        app.toast_config.herdr.position = crate::config::ToastHerdrPosition::TopLeft;
+        app.toast_config.shepherd.position = crate::config::ToastShepherdPosition::TopLeft;
         app.toast = Some(crate::app::state::ToastNotification {
             kind: crate::app::state::ToastKind::Finished,
             title: "pi finished".into(),
@@ -1381,7 +1381,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("unix time")
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("herdr-ui-test-{unique}"));
+        let root = std::env::temp_dir().join(format!("shepherd-ui-test-{unique}"));
         std::fs::create_dir_all(root.join(".git")).expect("create .git dir");
         std::fs::write(
             root.join(".git/HEAD"),

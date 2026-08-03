@@ -17,7 +17,7 @@ jobs:
         with:
           github-token: ${{ secrets.KANGAL_GITHUB_TOKEN }}
           script: |
-            const CANONICAL_REPOSITORY = 'ogulcancelik/herdr';
+            const CANONICAL_REPOSITORY = 'leonardoacosta/shepherd';
             const KANGAL_USER_ID = 285672167;
             const CI_ONLY_PR_AUTHOR_IDS = new Set([
               49699333, // dependabot[bot]
@@ -27,7 +27,7 @@ jobs:
             const MAX_UNAPPROVED_CHANGED_LINES = 1000;
             const REVIEW_LABELS = ['greptile-review', 'coderabbit-review'];
             const MAINTAINER_APPROVED_LABEL = 'maintainer-approved';
-            const COMMENT_MARKER = '<!-- herdr:pr-gate -->';
+            const COMMENT_MARKER = '<!-- shepherd:pr-gate -->';
 
             const pullNumber = context.payload.pull_request.number;
             const reopener = context.payload.sender?.login ?? null;
@@ -183,7 +183,7 @@ jobs:
               const message = [
                 `Hi @${prAuthor}, thanks for your interest in contributing!`,
                 '',
-                `Herdr automatically admits focused bug fixes from unapproved contributors when the title uses \`fix: ...\` or \`fix(scope): ...\` and the patch changes no more than ${MAX_UNAPPROVED_CHANGED_FILES} files and ${MAX_UNAPPROVED_CHANGED_LINES.toLocaleString('en-US')} total added or deleted lines.`,
+                `Shepherd automatically admits focused bug fixes from unapproved contributors when the title uses \`fix: ...\` or \`fix(scope): ...\` and the patch changes no more than ${MAX_UNAPPROVED_CHANGED_FILES} files and ${MAX_UNAPPROVED_CHANGED_LINES.toLocaleString('en-US')} total added or deleted lines.`,
                 '',
                 reason,
                 '',

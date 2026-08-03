@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "channel": "preview",
+  "base_version": "0.7.5",
+  "build_id": "source-only",
+  "commit": "b85ea7c50635d9e5d9bf6c226246dc87ccea0c2d",
+  "built_at": "2026-08-02T00:00:00Z",
+  "protocol": 19,
+  "notes": "Shepherd is source-built until its first product preview.",
+  "assets": {},
+  "builds": {}
+}

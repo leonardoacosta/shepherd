@@ -31,7 +31,7 @@ pub(crate) const MAX_REPLAY_BYTES_PER_PANE: usize = 8 * 1024;
 #[cfg(unix)]
 pub(crate) const COMMIT_TIMEOUT: Duration = READY_TIMEOUT;
 #[cfg(unix)]
-pub(crate) const HANDOFF_TOKEN_ENV_VAR: &str = "HERDR_HANDOFF_TOKEN";
+pub(crate) const HANDOFF_TOKEN_ENV_VAR: &str = "SHEPHERD_HANDOFF_TOKEN";
 
 #[cfg(unix)]
 #[derive(Serialize, Deserialize)]
@@ -54,7 +54,7 @@ pub(crate) struct ReceivedHandoff {
 
 #[cfg(unix)]
 pub(crate) fn handoff_socket_path() -> PathBuf {
-    crate::session::data_dir().join(format!("herdr-handoff-{}.sock", std::process::id()))
+    crate::session::data_dir().join(format!("shepherd-handoff-{}.sock", std::process::id()))
 }
 
 #[cfg(unix)]
@@ -75,7 +75,7 @@ pub(crate) fn spawn_handoff_import(
         .stderr(std::process::Stdio::null());
     if crate::session::explicit_session_requested() {
         // The import child no longer has the original `--session` argument, so
-        // stale socket overrides must not mask the inherited HERDR_SESSION.
+        // stale socket overrides must not mask the inherited SHEPHERD_SESSION.
         command
             .env_remove(crate::api::SOCKET_PATH_ENV_VAR)
             .env_remove(crate::server::socket_paths::CLIENT_SOCKET_PATH_ENV_VAR);
@@ -248,7 +248,7 @@ pub(crate) fn receive(socket_path: &Path, token: &str) -> io::Result<ReceivedHan
         .is_some_and(|version| version != crate::build_info::version())
     {
         return Err(io::Error::other(format!(
-            "handoff expected herdr v{}, but this server is v{}",
+            "handoff expected shepherd v{}, but this server is v{}",
             manifest.expected_version.as_deref().unwrap_or("unknown"),
             crate::build_info::version()
         )));
@@ -472,7 +472,7 @@ pub(crate) fn validate_import_exe(import_exe: Option<&Path>) -> io::Result<PathB
         None => std::env::current_exe().map_err(|err| {
             io::Error::new(
                 err.kind(),
-                format!("failed to determine herdr executable path: {err}"),
+                format!("failed to determine shepherd executable path: {err}"),
             )
         })?,
     };
@@ -517,7 +517,7 @@ pub(crate) fn validate_import_exe(import_exe: Option<&Path>) -> io::Result<PathB
     let current_exe = std::env::current_exe().map_err(|err| {
         io::Error::new(
             err.kind(),
-            format!("failed to determine current herdr executable path: {err}"),
+            format!("failed to determine current shepherd executable path: {err}"),
         )
     })?;
     let exe_dir = exe.parent().ok_or_else(|| {
@@ -533,7 +533,7 @@ pub(crate) fn validate_import_exe(import_exe: Option<&Path>) -> io::Result<PathB
         io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
-                "current herdr executable has no parent directory: {}",
+                "current shepherd executable has no parent directory: {}",
                 current_exe.display()
             ),
         )
@@ -551,7 +551,7 @@ pub(crate) fn validate_import_exe(import_exe: Option<&Path>) -> io::Result<PathB
         io::Error::new(
             err.kind(),
             format!(
-                "failed to canonicalize current herdr directory {}: {err}",
+                "failed to canonicalize current shepherd directory {}: {err}",
                 current_dir.display()
             ),
         )
@@ -560,7 +560,7 @@ pub(crate) fn validate_import_exe(import_exe: Option<&Path>) -> io::Result<PathB
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             format!(
-                "handoff import executable must live in the same directory as the current herdr binary: {}",
+                "handoff import executable must live in the same directory as the current shepherd binary: {}",
                 exe.display()
             ),
         ));
@@ -593,7 +593,10 @@ mod tests {
     fn unique_temp_path(label: &str) -> PathBuf {
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!("herdr-handoff-{label}-{}-{n}", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "shepherd-handoff-{label}-{}-{n}",
+            std::process::id()
+        ))
     }
 
     #[test]
@@ -633,7 +636,7 @@ mod tests {
     fn spawn_handoff_import_does_not_put_token_in_argv() {
         let current_exe = std::env::current_exe().unwrap();
         let script_path = current_exe.parent().unwrap().join(format!(
-            "herdr-handoff-import-argv-{}-{}.sh",
+            "shepherd-handoff-import-argv-{}-{}.sh",
             std::process::id(),
             unique_temp_path("script")
                 .file_name()

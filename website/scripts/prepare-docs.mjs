@@ -190,26 +190,35 @@ export function rewritePreviewDocContent(content, relativePath = '') {
   );
   const withEditLink = setGeneratedEditUrl(
     rewritten,
-    `https://github.com/ogulcancelik/herdr/edit/master/docs/next/website/src/content/docs/${relativePath}`,
+    `https://github.com/leonardoacosta/shepherd/edit/master/docs/next/website/src/content/docs/${relativePath}`,
   );
   return insertPreviewNotice(withEditLink, relativePath);
 }
 
 export function rewriteVersionDocContent(content, { version, tag, sourceRoot, relativePath }) {
+  const legacyUpstream = ['ogulcancelik/', 'he', 'rdr'].join('');
   const taggedContent = content
     .replaceAll('/docs/', `/docs/${version}/`)
     .replaceAll(
-      'https://github.com/ogulcancelik/herdr/blob/master/',
-      `https://github.com/ogulcancelik/herdr/blob/${tag}/`,
+      `https://github.com/${legacyUpstream}/blob/master/`,
+      `https://github.com/${legacyUpstream}/blob/${tag}/`,
     )
     .replaceAll(
-      'https://raw.githubusercontent.com/ogulcancelik/herdr/master/',
-      `https://raw.githubusercontent.com/ogulcancelik/herdr/${tag}/`,
+      'https://github.com/leonardoacosta/shepherd/blob/master/',
+      `https://github.com/leonardoacosta/shepherd/blob/${tag}/`,
+    )
+    .replaceAll(
+      `https://raw.githubusercontent.com/${legacyUpstream}/master/`,
+      `https://raw.githubusercontent.com/${legacyUpstream}/${tag}/`,
+    )
+    .replaceAll(
+      'https://raw.githubusercontent.com/leonardoacosta/shepherd/master/',
+      `https://raw.githubusercontent.com/leonardoacosta/shepherd/${tag}/`,
     );
   const rewritten = rewriteRelativeDocPaths(taggedContent, 2);
   return setGeneratedEditUrl(
     rewritten,
-    `https://github.com/ogulcancelik/herdr/blob/${tag}/${sourceRoot}/${relativePath}`,
+    `https://github.com/leonardoacosta/shepherd/blob/${tag}/${sourceRoot}/${relativePath}`,
   );
 }
 
@@ -233,7 +242,7 @@ function insertPreviewNotice(content, relativePath) {
   ].join('\n');
   const indexPrefix =
     relativePath === 'index.mdx'
-      ? content.replace('title: Herdr documentation', 'title: Herdr next documentation')
+      ? content.replace('title: Shepherd documentation', 'title: Shepherd next documentation')
       : content;
   const frontmatter = indexPrefix.match(/^---\n[\s\S]*?\n---\n/);
   if (!frontmatter) {

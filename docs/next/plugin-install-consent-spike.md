@@ -8,7 +8,7 @@ Scope: design spike for the plugin install surface and the `plugin.link` / `plug
 
 Install and link are gated very differently.
 
-`herdr plugin install` runs a deliberate trust flow in the CLI: `plugin_install`
+`shepherd plugin install` runs a deliberate trust flow in the CLI: `plugin_install`
 (`src/cli/plugin.rs:448`) clones the source, loads and previews the manifest
 (`:490-493`), checks replacement rules (`:495`), and only then prompts through
 `confirm("Install this plugin?")` (`:500`, helper at `:1844`). After the prompt it calls
@@ -38,8 +38,8 @@ The payoff lands at the next server start. `run_plugin_startup_hooks`
 `plugin.enabled && plugin_manifest_available(plugin) && !plugin.startup.is_empty()` (`:191`)
 and spawns each `[[startup]]` command via `start_plugin_command` (`:206` → `:16`), using
 `command_for_argv_in_dir` with cwd set to the plugin's own root (`:122`). The child runs
-with the full privileges of the herdr server process, unsandboxed, and its environment
-includes `HERDR_SOCKET_PATH` / `HERDR_BIN_PATH` / `HERDR_ENV=1` — so the spawned process can
+with the full privileges of the shepherd server process, unsandboxed, and its environment
+includes `SHEPHERD_SOCKET_PATH` / `SHEPHERD_BIN_PATH` / `SHEPHERD_ENV=1` — so the spawned process can
 turn around and drive the API itself. `headless.rs:2967` and `:3085` call
 `run_plugin_startup_hooks` unconditionally right after server start.
 
@@ -49,7 +49,7 @@ Enablement alone is sufficient. Nothing re-confirms at execution time.
 
 The peer-credential check shipped in `80e25966` (`peer_uid_authorized`, `src/ipc.rs:228`,
 wired at `src/api/server.rs:118`) rejects connections whose peer uid differs from the
-server's. That is a real boundary, but it is **orthogonal to this threat**: herdr's whole
+server's. That is a real boundary, but it is **orthogonal to this threat**: shepherd's whole
 purpose is hosting coding agents that run as the same uid as the server. A hostile or
 compromised agent in a pane is precisely a same-uid peer, so it passes the check
 unconditionally. On Windows the check is a documented no-op (`src/ipc.rs:246`,
@@ -67,7 +67,7 @@ independent reasons:
    commands), post-build re-validation, and the final `PluginLink` — runs identically. The
    guard at `:482` only *requires* `--yes` when stdin is not a TTY; it does not restrict who
    may pass it. An agent with shell access can simply run
-   `herdr plugin install <src> --yes`.
+   `shepherd plugin install <src> --yes`.
 
 This matters for scoping: closing the API gap alone does **not** close the threat. It closes
 one of two doors.
@@ -186,7 +186,7 @@ this section does.
 1. **Flip `PluginLinkParams.enabled` to default `false`** (`src/api/schema/plugins.rs:14-15`).
    Approved as a breaking API change. An API caller omitting `enabled` must link the plugin
    disabled. `register_installed_plugin` (`src/cli/plugin.rs:1208`) must pass `enabled: true`
-   explicitly so `herdr plugin install` keeps its current end state, and every other in-repo
+   explicitly so `shepherd plugin install` keeps its current end state, and every other in-repo
    `PluginLinkParams` construction site must be made explicit. The generated TypeScript
    client types (`clients/ts`, checked by `just generated-api-client-test`) need regenerating
    if the emitted schema changes. Needs a test asserting a `plugin.link` omitting `enabled`
@@ -206,7 +206,7 @@ this section does.
    so the action is observable. Defence in depth only — it is opt-in by subscription
    (`events.rs:12`) and therefore suppressible, and it does not prevent execution.
 
-4. **The `--yes` bypass is a separate hole.** `herdr plugin install <src> --yes` is reachable
+4. **The `--yes` bypass is a separate hole.** `shepherd plugin install <src> --yes` is reachable
    by any same-uid process, including an agent in a pane, and skips `confirm()` entirely
    (`src/cli/plugin.rs:471-474`, `:500`). No API-side gate closes this. Tracked as its own
    follow-up.

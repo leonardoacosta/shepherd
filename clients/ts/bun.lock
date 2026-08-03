@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@herdr/api-client",
+      "name": "@shepherd/api-client",
       "devDependencies": {
         "json-schema-to-typescript": "^15.0.4",
         "typescript": "^5.9.2",

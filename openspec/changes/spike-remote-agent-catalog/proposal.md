@@ -16,7 +16,7 @@ Base commit: `c000681f` · Route: proposal (design spike) · Effort: L (full) / 
 Resolves advisory finding DIRECTION-04 (audit against `1de05dc2`).
 
 Recognizing a new coding agent is data (a manifest), but the remote catalog
-(`https://herdr.dev/agent-detection/index.toml`) can only ever **replace** a
+(`https://shepherd.dev/agent-detection/index.toml`) can only ever **replace** a
 manifest for an agent the binary already knows, never add a new one. The
 constraint is real, but it is enforced at a different seam than the original
 draft claimed:
@@ -46,7 +46,7 @@ draft claimed:
   then waiting for a release. `CONTRIBUTING.md:41` routes such a feature
   through a Discussion + maintainer approval first.
 
-New agents ship constantly, and "herdr recognizes my agent" is the single
+New agents ship constantly, and "shepherd recognizes my agent" is the single
 highest-value outside contribution — it is data, not code. The out-of-band
 delivery infra already exists and is tested (`src/detect/manifest/tests.rs`
 covers remote/local/bundled precedence and version shadowing); only the
@@ -91,7 +91,7 @@ have to move or delete, not just extend.
 | --- | --- | --- |
 | `BUNDLED_MANIFESTS` | `const &[(&str, &str)]`, storage only — callers still pass in an `Agent` and convert | `src/detect/manifest.rs:240-258` |
 | `HookAuthority.agent_label: String` + all `Hook*`/`AgentSessionReported` `AppEvent` variants | Hook-sourced agent identity, end-to-end string, never touches `Agent` | `src/terminal/state.rs:18-20` (struct), `src/events.rs:71-114` |
-| `full_lifecycle_hook_authority(source: &str, agent_label: &str)`, `session_identity_only_integration` | Hardcoded closed allowlist of `(source, label)` string pairs (`herdr:pi`/"pi", `herdr:omp`/"omp", etc. — 6 pairs + 1) — string-typed, but just as closed as the enum, not a precedent for open string ids | `src/detect/mod.rs:283-297` |
+| `full_lifecycle_hook_authority(source: &str, agent_label: &str)`, `session_identity_only_integration` | Hardcoded closed allowlist of `(source, label)` string pairs (`shepherd:pi`/"pi", `shepherd:omp`/"omp", etc. — 6 pairs + 1) — string-typed, but just as closed as the enum, not a precedent for open string ids | `src/detect/mod.rs:283-297` |
 | `src/api/schema/agents.rs` (`AgentInfo.agent`, `AgentSessionInfo.agent`), `src/api/schema/panes.rs`, `src/api/schema/events.rs`, `src/api/schema/plugins.rs::focused_pane_agent` | Wire/API schema — **already fully `String`/`Option<String>`**, no `Agent` enum on the wire. This is the other part of the original draft that was wrong: it cited `src/api/schema/agents.rs` as enum-coupled; it is not. | `src/api/schema/agents.rs:189,197,228` |
 | `TerminalState::effective_agent_label() -> Option<&str>` | Public string accessor most consumers already use instead of the enum | `src/terminal/state.rs:1698-1709` |
 
@@ -163,7 +163,7 @@ state machine — a `Copy` enum threaded through detection, config, and pane
 lifecycle, not merely storage. That surface did not shrink from the original
 draft's estimate; only the bundled-storage sliver of it already moved. The
 community-PR path captures the same user-facing value (a documented,
-reviewable path to "herdr recognizes my agent") at a fraction of the risk,
+reviewable path to "shepherd recognizes my agent") at a fraction of the risk,
 using infrastructure (regex caps, `regex::Regex`'s ReDoS-free guarantee,
 `detection-golden-corpus` fixtures) that already exists and is already
 enforced on every manifest the binary parses, remote or bundled.

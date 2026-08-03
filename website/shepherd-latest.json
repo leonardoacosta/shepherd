@@ -1,0 +1,12 @@
+{
+  "version": "0.7.5",
+  "protocol": 19,
+  "notes": "Shepherd is source-built until its first product release.",
+  "assets": {},
+  "releases": {
+    "0.7.5": {
+      "notes": "Shepherd is source-built until its first product release.",
+      "assets": {}
+    }
+  }
+}

@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use tracing::warn;
 
-const DISABLE_SOUND_ENV: &str = "HERDR_DISABLE_SOUND";
+const DISABLE_SOUND_ENV: &str = "SHEPHERD_DISABLE_SOUND";
 #[cfg(not(any(windows, target_os = "macos")))]
 const AUDIO_PLAYER_TIMEOUT: Duration = Duration::from_secs(15);
 #[cfg(not(any(windows, target_os = "macos")))]
@@ -97,7 +97,7 @@ fn play_bytes(data: &[u8]) -> Result<(), String> {
 
 fn temp_sound_path() -> PathBuf {
     let id = SOUND_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("herdr-sound-{}-{id}.mp3", std::process::id()))
+    std::env::temp_dir().join(format!("shepherd-sound-{}-{id}.mp3", std::process::id()))
 }
 
 #[cfg(windows)]
@@ -358,7 +358,7 @@ mod tests {
             args: &[
                 "-c",
                 "printf '%s' \"$$\" > \"$1\"; exec sleep 2",
-                "herdr-sound-timeout-test",
+                "shepherd-sound-timeout-test",
             ],
         };
         let result = player.output_with_timeout(&pid_path, Duration::from_millis(100));
@@ -387,7 +387,7 @@ mod tests {
             args: &[
                 "-c",
                 "i=0; while [ \"$i\" -lt 8192 ]; do printf 0123456789abcdef; i=$((i + 1)); done; i=0; while [ \"$i\" -lt 8192 ]; do printf fedcba9876543210; i=$((i + 1)); done >&2; exit 7",
-                "herdr-sound-output-test",
+                "shepherd-sound-output-test",
             ],
         };
 

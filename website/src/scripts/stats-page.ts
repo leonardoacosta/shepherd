@@ -1,8 +1,8 @@
 // Client renderer for /stats/. Fetches the public stats snapshot from R2 and
 // renders every number and chart client-side, so the static page never goes stale.
 
-const STATS_URL = "https://assets.herdr.dev/stats/stats.json";
-const REPO_API_URL = "https://api.github.com/repos/ogulcancelik/herdr";
+const STATS_URL = "https://assets.shepherd.dev/stats/stats.json";
+const REPO_API_URL = "https://api.github.com/repos/leonardoacosta/shepherd";
 
 const LINE_H = 320;
 const BAR_W = 420;
@@ -429,8 +429,8 @@ function timelineTerminal(stats: StatsJson, milestones: Milestone[]): string {
     .join("");
 
   return `
-    <div class="milestone-term" role="img" aria-label="herdr timeline">
-      <div class="term-line term-cmd-line"><span class="term-prompt">$</span><span class="term-cmd">herdr stats --timeline</span></div>
+    <div class="milestone-term" role="img" aria-label="shepherd timeline">
+      <div class="term-line term-cmd-line"><span class="term-prompt">$</span><span class="term-cmd">shepherd stats --timeline</span></div>
       ${body}
     </div>`;
 }
@@ -671,7 +671,7 @@ function render(stats: StatsJson): void {
   );
 
   // traffic
-  setText("traffic-sub", `herdr.dev traffic over the last ${stats.traffic.windowDays} days, measured by Cloudflare.`);
+  setText("traffic-sub", `shepherd.dev traffic over the last ${stats.traffic.windowDays} days, measured by Cloudflare.`);
   setHtml(
     "rank-countries",
     rankList(

@@ -18,7 +18,7 @@ PORTABLE_PTY_CRATE_API_URL = "https://crates.io/api/v1/crates/portable-pty"
 REQUEST_TIMEOUT_SECONDS = 30
 REQUEST_HEADERS = {
     "Accept": "application/json",
-    "User-Agent": "herdr-vendor-upstream-drift-check",
+    "User-Agent": "shepherd-vendor-upstream-drift-check",
 }
 
 

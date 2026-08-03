@@ -103,7 +103,7 @@ mod tests {
 
     fn temp_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "herdr-atomic-tests-{name}-{}-{}",
+            "shepherd-atomic-tests-{name}-{}-{}",
             std::process::id(),
             now_nanos()
         ))

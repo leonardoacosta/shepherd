@@ -13,7 +13,7 @@ afterEach(async () => {
 
 describe('documentation release publishing', () => {
   test('snapshots tagged next docs and promotes the same content', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'herdr-docs-'));
+    const root = await mkdtemp(join(tmpdir(), 'shepherd-docs-'));
     temporaryDirectories.push(root);
     await write(root, 'website/src/content/docs/index.mdx', 'stable docs\n');
     await write(root, 'website/src/data/config-reference.json', '{"stable":true}\n');
@@ -67,7 +67,7 @@ function git(root: string, args: string[]) {
 function runScript(root: string, args: string[]) {
   execFileSync('node', [script, ...args], {
     cwd: root,
-    env: { ...process.env, HERDR_DOCS_REPO_ROOT: root },
+    env: { ...process.env, SHEPHERD_DOCS_REPO_ROOT: root },
     stdio: 'pipe',
   });
 }

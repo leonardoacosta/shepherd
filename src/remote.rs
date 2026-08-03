@@ -4,10 +4,20 @@ mod unix;
 #[cfg(unix)]
 pub(crate) use unix::*;
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct RemoteCheck {
+    pub(crate) ok: bool,
+    pub(crate) target: String,
+    pub(crate) product: String,
+    pub(crate) version: String,
+    pub(crate) protocol: u32,
+    pub(crate) binary: String,
+}
+
 #[cfg(windows)]
-pub(crate) const REATTACH_COMMAND_ENV_VAR: &str = "HERDR_REATTACH_COMMAND";
+pub(crate) const REATTACH_COMMAND_ENV_VAR: &str = "SHEPHERD_REATTACH_COMMAND";
 #[cfg(windows)]
-pub(crate) const REMOTE_KEYBINDINGS_ENV_VAR: &str = "HERDR_REMOTE_KEYBINDINGS";
+pub(crate) const REMOTE_KEYBINDINGS_ENV_VAR: &str = "SHEPHERD_REMOTE_KEYBINDINGS";
 
 #[cfg(windows)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,6 +150,14 @@ pub(crate) fn run_remote(_remote: RemoteLaunch) -> std::io::Result<()> {
 }
 
 #[cfg(windows)]
+pub(crate) fn run_remote_check(_target: &str) -> std::io::Result<RemoteCheck> {
+    debug_assert!(!crate::platform::capabilities().remote_attach);
+    Err(std::io::Error::other(
+        "remote check is not supported on Windows yet",
+    ))
+}
+
+#[cfg(windows)]
 pub(crate) fn run_remote_client_bridge() -> std::io::Result<()> {
     debug_assert!(!crate::platform::capabilities().remote_attach);
     Err(std::io::Error::other(
@@ -154,7 +172,7 @@ pub(crate) fn print_remote_error_hint(err: &std::io::Error, target: &str) {
             ssh_check_command(target)
         );
         eprintln!(
-            "hint: if your SSH key has a passphrase, load it into ssh-agent with `ssh-add` before running `herdr --remote`."
+            "hint: if your SSH key has a passphrase, load it into ssh-agent with `ssh-add` before running `shepherd --remote`."
         );
     }
 }

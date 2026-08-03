@@ -35,10 +35,10 @@ fn parse_status_args(args: &[String]) -> Option<(StatusScope, bool)> {
         None => Some((StatusScope::Full, false)),
         Some("--json") if args.len() == 1 => Some((StatusScope::Full, true)),
         Some("server") => {
-            parse_status_scope_args(args, StatusScope::Server, "herdr status server [--json]")
+            parse_status_scope_args(args, StatusScope::Server, "shepherd status server [--json]")
         }
         Some("client") => {
-            parse_status_scope_args(args, StatusScope::Client, "herdr status client [--json]")
+            parse_status_scope_args(args, StatusScope::Client, "shepherd status client [--json]")
         }
         Some("help" | "--help" | "-h") => {
             if args.len() > 1 {
@@ -218,6 +218,7 @@ struct FullStatusJson {
 
 #[derive(Serialize)]
 struct ClientStatusJson {
+    product: &'static str,
     version: String,
     channel: &'static str,
     protocol: u32,
@@ -251,6 +252,7 @@ struct UpdateStatusJson {
 
 fn client_status_json() -> ClientStatusJson {
     ClientStatusJson {
+        product: "shepherd",
         version: crate::build_info::version(),
         channel: crate::config::Config::load().config.update.channel.as_str(),
         protocol: crate::protocol::PROTOCOL_VERSION,
@@ -324,8 +326,19 @@ fn current_exe_label() -> String {
 }
 
 fn print_status_help() {
-    eprintln!("herdr status commands:");
-    eprintln!("  herdr status [--json]         show local client and running server status");
-    eprintln!("  herdr status server [--json]  show running server status");
-    eprintln!("  herdr status client [--json]  show local client binary status");
+    eprintln!("shepherd status commands:");
+    eprintln!("  shepherd status [--json]         show local client and running server status");
+    eprintln!("  shepherd status server [--json]  show running server status");
+    eprintln!("  shepherd status client [--json]  show local client binary status");
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn client_status_json_identifies_shepherd() {
+        let status = super::client_status_json();
+
+        assert_eq!(status.product, "shepherd");
+        assert_eq!(status.protocol, crate::protocol::PROTOCOL_VERSION);
+    }
 }

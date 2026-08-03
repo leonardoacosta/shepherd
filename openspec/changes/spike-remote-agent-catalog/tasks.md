@@ -49,7 +49,7 @@ criterion).
    blast radius, re-measured against the current tree, did not shrink from the
    original estimate — `src/pane.rs`'s process-identification state machine and
    the manifest-cache/resolution chain are still fully enum-native — while the
-   community-PR path delivers the same "herdr recognizes my agent" value using
+   community-PR path delivers the same "shepherd recognizes my agent" value using
    infrastructure (regex caps, ReDoS-free engine, `detection-golden-corpus`
    fixtures) that is already built and already enforced today.
 

@@ -1,9 +1,9 @@
 [CmdletBinding()]
 param(
-    [string]$Channel = $env:HERDR_CHANNEL,
-    [string]$ManifestUrl = $env:HERDR_MANIFEST_URL,
-    [string]$InstallDir = $env:HERDR_INSTALL_DIR,
-    [string]$ExpectedBuildId = $env:HERDR_EXPECTED_BUILD_ID,
+    [string]$Channel = $env:SHEPHERD_CHANNEL,
+    [string]$ManifestUrl = $env:SHEPHERD_MANIFEST_URL,
+    [string]$InstallDir = $env:SHEPHERD_INSTALL_DIR,
+    [string]$ExpectedBuildId = $env:SHEPHERD_EXPECTED_BUILD_ID,
     [int]$Retain = 3
 )
 
@@ -16,7 +16,7 @@ if ([string]::IsNullOrWhiteSpace($Channel)) {
 }
 
 if ($Channel -notin @("stable", "preview")) {
-    Write-Error "Invalid Herdr channel '$Channel'. Use 'preview'."
+    Write-Error "Invalid Shepherd channel '$Channel'. Use 'preview'."
     exit 1
 }
 
@@ -30,8 +30,8 @@ function Write-WarningStep {
     Write-Warning $Message
 }
 
-function Get-HerdrCommandSource {
-    $existing = Get-Command herdr -ErrorAction SilentlyContinue
+function Get-ShepherdCommandSource {
+    $existing = Get-Command shepherd -ErrorAction SilentlyContinue
     if ($null -eq $existing) {
         return $null
     }
@@ -102,7 +102,7 @@ function Get-ManifestAsset {
 
     $property = $Manifest.assets.PSObject.Properties[$Target]
     if ($null -eq $property) {
-        throw "Release manifest does not include a binary for $Target."
+        throw "No Shepherd binary release exists for $Target. Use the installfest-owned shepherd-install source build."
     }
 
     $asset = $property.Value
@@ -181,7 +181,7 @@ function Test-FileDigest {
         $sha256.Dispose()
     }
     if ($actual -ne $ExpectedDigest.ToLowerInvariant()) {
-        throw "Downloaded Herdr checksum did not match. Expected $ExpectedDigest but got $actual."
+        throw "Downloaded Shepherd checksum did not match. Expected $ExpectedDigest but got $actual."
     }
 }
 
@@ -205,7 +205,7 @@ function Test-RegularDirectory {
     return -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
 }
 
-function Test-HerdrReleaseComplete {
+function Test-ShepherdPackageComplete {
     param(
         [string]$ReleaseDir,
         [string]$Format
@@ -214,8 +214,8 @@ function Test-HerdrReleaseComplete {
     if (-not (Test-RegularDirectory -Path $ReleaseDir)) {
         return $false
     }
-    $herdrExe = Join-Path $ReleaseDir "herdr.exe"
-    if (-not (Test-RegularFile -Path $herdrExe)) {
+    $shepherdExe = Join-Path $ReleaseDir "shepherd.exe"
+    if (-not (Test-RegularFile -Path $shepherdExe)) {
         return $false
     }
     if ($Format -eq "exe") {
@@ -228,7 +228,7 @@ function Test-HerdrReleaseComplete {
         -not (Test-RegularDirectory -Path (Join-Path $conptyRoot "arm64"))) {
         return $false
     }
-    $markerPath = Join-Path $conptyRoot "herdr-conpty.json"
+    $markerPath = Join-Path $conptyRoot "shepherd-conpty.json"
     $required = @(
         "conpty/conpty.dll",
         "conpty/x64/OpenConsole.exe",
@@ -280,7 +280,7 @@ function Test-HerdrReleaseComplete {
         $actualBundleFiles = @($bundleEntries | Where-Object { -not $_.PSIsContainer } | ForEach-Object {
             $_.FullName.Substring($releaseRoot.Length + 1).Replace('\', '/')
         })
-        $expectedBundleFiles = @($expectedConptyFiles) + "conpty/herdr-conpty.json"
+        $expectedBundleFiles = @($expectedConptyFiles) + "conpty/shepherd-conpty.json"
         if (@(Compare-Object $expectedBundleFiles $actualBundleFiles).Count -ne 0) {
             return $false
         }
@@ -341,7 +341,7 @@ function Set-ManagedJunction {
         [string]$LinkPath,
         [string]$TargetPath,
         [string]$ManagedTargetPrefix,
-        [bool]$AllowLegacyHerdrBinMigration = $false
+        [bool]$AllowLegacyShepherdBinMigration = $false
     )
 
     if (Test-Path -LiteralPath $LinkPath) {
@@ -360,7 +360,7 @@ function Set-ManagedJunction {
             Remove-Item -LiteralPath $LinkPath -Recurse -Force
         } elseif ($item.PSIsContainer) {
             if ((Get-ChildItem -LiteralPath $LinkPath -Force | Select-Object -First 1) -ne $null) {
-                if (-not (Move-LegacyHerdrBinDirectory -Path $LinkPath -AllowMigration $AllowLegacyHerdrBinMigration)) {
+                if (-not (Move-LegacyShepherdBinDirectory -Path $LinkPath -AllowMigration $AllowLegacyShepherdBinMigration)) {
                     throw "Refusing to replace non-empty directory at $LinkPath with a junction."
                 }
             } else {
@@ -375,7 +375,7 @@ function Set-ManagedJunction {
     New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath | Out-Null
 }
 
-function Move-LegacyHerdrBinDirectory {
+function Move-LegacyShepherdBinDirectory {
     param(
         [string]$Path,
         [bool]$AllowMigration
@@ -390,13 +390,13 @@ function Move-LegacyHerdrBinDirectory {
         return $false
     }
 
-    if (($entries | Where-Object { $_.Name -ieq "herdr.exe" } | Select-Object -First 1) -eq $null) {
+    if (($entries | Where-Object { $_.Name -ieq "shepherd.exe" } | Select-Object -First 1) -eq $null) {
         return $false
     }
 
     $legacyPath = "$Path.legacy.$([System.Guid]::NewGuid().ToString("N"))"
     Move-Item -LiteralPath $Path -Destination $legacyPath
-    Write-Step "Moved legacy Herdr bin directory to $legacyPath."
+    Write-Step "Moved legacy Shepherd bin directory to $legacyPath."
     return $true
 }
 
@@ -441,7 +441,7 @@ function Remove-OldReleases {
     }
 }
 
-function Resolve-HerdrVersion {
+function Resolve-ShepherdVersion {
     param(
         [object]$Manifest,
         [string]$SelectedChannel
@@ -466,7 +466,7 @@ if ($env:OS -ne "Windows_NT") {
 }
 
 if (-not [Environment]::Is64BitOperatingSystem) {
-    Write-Error "Herdr requires 64-bit Windows."
+    Write-Error "Shepherd requires 64-bit Windows."
     exit 1
 }
 
@@ -494,24 +494,24 @@ switch ($architecture) {
 
 if ([string]::IsNullOrWhiteSpace($ManifestUrl)) {
     $ManifestUrl = if ($Channel -eq "preview") {
-        "https://herdr.dev/preview.json"
+        "https://shepherd.dev/shepherd-preview.json"
     } else {
-        "https://herdr.dev/latest.json"
+        "https://shepherd.dev/shepherd-latest.json"
     }
 }
 
-$herdrHome = if ([string]::IsNullOrWhiteSpace($env:HERDR_HOME)) {
-    Join-Path $env:USERPROFILE ".herdr"
+$shepherdHome = if ([string]::IsNullOrWhiteSpace($env:SHEPHERD_HOME)) {
+    Join-Path $env:USERPROFILE ".shepherd"
 } else {
-    $env:HERDR_HOME
+    $env:SHEPHERD_HOME
 }
-$herdrHome = [System.IO.Path]::GetFullPath($herdrHome)
-$standaloneRoot = Join-Path $herdrHome "packages\standalone"
+$shepherdHome = [System.IO.Path]::GetFullPath($shepherdHome)
+$standaloneRoot = Join-Path $shepherdHome "packages\standalone"
 $releasesDir = Join-Path $standaloneRoot "releases"
 $currentDir = Join-Path $standaloneRoot "current"
 $lockPath = Join-Path $standaloneRoot "install.lock"
 
-$defaultVisibleBinDir = Join-Path $env:LOCALAPPDATA "Programs\Herdr\bin"
+$defaultVisibleBinDir = Join-Path $env:LOCALAPPDATA "Programs\Shepherd\bin"
 $visibleBinDir = if ([string]::IsNullOrWhiteSpace($InstallDir)) {
     $defaultVisibleBinDir
 } else {
@@ -527,35 +527,35 @@ try {
     $allowLegacyVisibleBinMigration = $false
 }
 
-$existingHerdr = Get-HerdrCommandSource
-if (-not [string]::IsNullOrWhiteSpace($existingHerdr) -and -not (Test-PathStartsWith -Path $existingHerdr -Prefix $visibleBinDir)) {
-    Write-Step "Detected existing Herdr command at $existingHerdr"
-    Write-WarningStep "PATH order decides which Herdr runs. This installer will put $visibleBinDir first for future and current PowerShell sessions."
+$existingShepherd = Get-ShepherdCommandSource
+if (-not [string]::IsNullOrWhiteSpace($existingShepherd) -and -not (Test-PathStartsWith -Path $existingShepherd -Prefix $visibleBinDir)) {
+    Write-Step "Detected existing Shepherd command at $existingShepherd"
+    Write-WarningStep "PATH order decides which Shepherd runs. This installer will put $visibleBinDir first for future and current PowerShell sessions."
 }
 
-Write-Step "Fetching Herdr $Channel manifest"
+Write-Step "Fetching Shepherd $Channel manifest"
 $manifest = ConvertTo-ManifestObject -Manifest (Invoke-RestMethod -Uri $ManifestUrl)
 if (-not [string]::IsNullOrWhiteSpace($ExpectedBuildId) -and [string]$manifest.build_id -ne $ExpectedBuildId) {
-    throw "Preview manifest changed while updating. Expected build $ExpectedBuildId but found $($manifest.build_id). Run herdr update again."
+    throw "Preview manifest changed while updating. Expected build $ExpectedBuildId but found $($manifest.build_id). Run shepherd update again."
 }
-$versionIdentity = Resolve-HerdrVersion -Manifest $manifest -SelectedChannel $Channel
+$versionIdentity = Resolve-ShepherdVersion -Manifest $manifest -SelectedChannel $Channel
 $asset = Get-ManifestAsset -Manifest $manifest -Target $target
 $safeVersionIdentity = $versionIdentity -replace '[^0-9A-Za-z._-]', '-'
 $releaseName = "$safeVersionIdentity-$targetTriple"
 $releaseDir = Join-Path $releasesDir $releaseName
 
-Write-Step "Installing Herdr $versionIdentity for $targetTriple"
-$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("herdr-install-" + [System.Guid]::NewGuid().ToString("N"))
+Write-Step "Installing Shepherd $versionIdentity for $targetTriple"
+$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("shepherd-install-" + [System.Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
 
 try {
     Invoke-WithInstallLock -LockPath $lockPath -Script {
         Remove-StaleInstallArtifacts -ReleasesDir $releasesDir
 
-        if (-not (Test-HerdrReleaseComplete -ReleaseDir $releaseDir -Format $asset.Format)) {
-            $downloadPath = Join-Path $tempDir "herdr-download.$($asset.Format)"
+        if (-not (Test-ShepherdPackageComplete -ReleaseDir $releaseDir -Format $asset.Format)) {
+            $downloadPath = Join-Path $tempDir "shepherd-download.$($asset.Format)"
             $stagingDir = Join-Path $releasesDir ".staging.$releaseName.$PID"
-            Write-Step "Downloading Herdr"
+            Write-Step "Downloading Shepherd"
             Invoke-WebRequest -Uri $asset.Url -OutFile $downloadPath
             Test-FileDigest -Path $downloadPath -ExpectedDigest $asset.Sha256
 
@@ -563,15 +563,15 @@ try {
                 Expand-Archive -LiteralPath $downloadPath -DestinationPath $stagingDir
             } else {
                 New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
-                Copy-Item -LiteralPath $downloadPath -Destination (Join-Path $stagingDir "herdr.exe")
+                Copy-Item -LiteralPath $downloadPath -Destination (Join-Path $stagingDir "shepherd.exe")
             }
-            if (-not (Test-HerdrReleaseComplete -ReleaseDir $stagingDir -Format $asset.Format)) {
-                throw "Downloaded Herdr package is incomplete or failed ConPTY verification."
+            if (-not (Test-ShepherdPackageComplete -ReleaseDir $stagingDir -Format $asset.Format)) {
+                throw "Downloaded Shepherd package is incomplete or failed ConPTY verification."
             }
-            $stagedHerdr = Join-Path $stagingDir "herdr.exe"
-            & $stagedHerdr --version *> $null
+            $stagedShepherd = Join-Path $stagingDir "shepherd.exe"
+            & $stagedShepherd --version *> $null
             if ($LASTEXITCODE -ne 0) {
-                throw "Downloaded Herdr command failed verification: $stagedHerdr --version"
+                throw "Downloaded Shepherd command failed verification: $stagedShepherd --version"
             }
             $backupDir = $null
             if (Test-Path -LiteralPath $releaseDir) {
@@ -591,16 +591,16 @@ try {
             }
         }
 
-        $releaseHerdr = Join-Path $releaseDir "herdr.exe"
-        & $releaseHerdr --version *> $null
+        $releaseShepherd = Join-Path $releaseDir "shepherd.exe"
+        & $releaseShepherd --version *> $null
         if ($LASTEXITCODE -ne 0) {
-            throw "Installed Herdr command failed verification: $releaseHerdr --version"
+            throw "Installed Shepherd command failed verification: $releaseShepherd --version"
         }
         Get-ChildItem -LiteralPath $releasesDir -Force -Directory -Filter ".backup.$releaseName.*" -ErrorAction SilentlyContinue |
             Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
         Set-ManagedJunction -LinkPath $currentDir -TargetPath $releaseDir -ManagedTargetPrefix $releasesDir
-        Set-ManagedJunction -LinkPath $visibleBinDir -TargetPath $releaseDir -ManagedTargetPrefix $standaloneRoot -AllowLegacyHerdrBinMigration $allowLegacyVisibleBinMigration
+        Set-ManagedJunction -LinkPath $visibleBinDir -TargetPath $releaseDir -ManagedTargetPrefix $standaloneRoot -AllowLegacyShepherdBinMigration $allowLegacyVisibleBinMigration
 
         Remove-OldReleases -ReleasesDir $releasesDir -CurrentReleaseDir $releaseDir -Keep $Retain
     }
@@ -622,11 +622,11 @@ if ($newProcessPath -cne $env:Path) {
     $env:Path = $newProcessPath
 }
 
-$resolvedHerdr = Get-HerdrCommandSource
-if (-not (Test-PathStartsWith -Path $resolvedHerdr -Prefix $visibleBinDir)) {
-    Write-WarningStep "PowerShell still resolves herdr to $resolvedHerdr. Open a new PowerShell window or inspect PATH order manually."
+$resolvedShepherd = Get-ShepherdCommandSource
+if (-not (Test-PathStartsWith -Path $resolvedShepherd -Prefix $visibleBinDir)) {
+    Write-WarningStep "PowerShell still resolves shepherd to $resolvedShepherd. Open a new PowerShell window or inspect PATH order manually."
 }
 
-Write-Step "Current PowerShell session: herdr"
-Write-Step "Future PowerShell windows: open a new PowerShell window and run: herdr"
-Write-Host "Herdr $versionIdentity installed successfully."
+Write-Step "Current PowerShell session: shepherd"
+Write-Step "Future PowerShell windows: open a new PowerShell window and run: shepherd"
+Write-Host "Shepherd $versionIdentity installed successfully."

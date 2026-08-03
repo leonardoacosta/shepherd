@@ -17,9 +17,9 @@ Every installed plugin is frozen at install time:
 - `src/cli/spec.rs:762-776` — `plugin install` accepts `--ref` to pin a git ref;
   there is no `plugin upgrade`, `plugin update`, or `plugin outdated` subcommand
   and no corresponding API method. (Still true.)
-- `src/app/api/plugins/manifest.rs:229` (`validate_min_herdr_version`) enforces
-  `min_herdr_version` in one direction only (rejects a plugin needing a newer
-  herdr); nothing notices a plugin being stale relative to upstream. (Still true.)
+- `src/app/api/plugins/manifest.rs:229` (`validate_min_shepherd_version`) enforces
+  `min_shepherd_version` in one direction only (rejects a plugin needing a newer
+  shepherd); nothing notices a plugin being stale relative to upstream. (Still true.)
 - `workers/plugin-marketplace/wrangler.toml:15` — the marketplace re-indexes
   every 30 minutes (`crons = ["*/30 * * * *"]`), but its snapshot
   (`workers/plugin-marketplace/src/index.ts:53-82`) is a GitHub topic-search
@@ -37,7 +37,7 @@ A plugin author shipping a fix has no channel to reach users; a user must
 `uninstall` + `install` by hand. The detection-manifest subsystem solved the
 *mechanics* of this problem (`src/detect/manifest_update.rs`: scheduled remote
 check, cache, atomic write) but not the *data source* — its remote index is
-Herdr-owned and version-keyed, unlike the plugin marketplace's discovery cache,
+Shepherd-owned and version-keyed, unlike the plugin marketplace's discovery cache,
 so only the mechanics transfer; `plugin outdated` needs a live upstream git ref
 check as its actual comparison source (see tasks.md Step 2).
 

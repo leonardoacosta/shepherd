@@ -1,9 +1,9 @@
-# herdr task runner
+# shepherd task runner
 
 # Run tests
 test:
     cargo nextest run --locked --status-level fail --final-status-level fail --failure-output final --success-output never
-    python3 -m unittest scripts.test_agent_detection_manifest_check scripts.test_changelog scripts.test_config_reference_check scripts.test_docs_translation_parity scripts.test_hermes_integration_asset scripts.test_package_windows_conpty scripts.test_preview scripts.test_socket_api_reference_check scripts.test_vendor_libghostty_vt scripts.test_vendor_portable_pty scripts.test_vendor_upstream_drift
+    python3 -m unittest scripts.test_agent_detection_manifest_check scripts.test_changelog scripts.test_config_reference_check scripts.test_docs_translation_parity scripts.test_hermes_integration_asset scripts.test_package_windows_conpty scripts.test_preview scripts.test_shepherd_release_boundary scripts.test_socket_api_reference_check scripts.test_vendor_libghostty_vt scripts.test_vendor_portable_pty scripts.test_vendor_upstream_drift
     just integration-assets-test
     just plugin-marketplace-test
     just generated-api-client-test
@@ -35,12 +35,12 @@ ci filter='all()': lint
 [unix]
 windows-lint:
     rustup target add x86_64-pc-windows-msvc
-    LIBGHOSTTY_VT_SIMD=false cargo clippy --bin herdr --locked --target x86_64-pc-windows-msvc -- -D warnings
+    LIBGHOSTTY_VT_SIMD=false cargo clippy --bin shepherd --locked --target x86_64-pc-windows-msvc -- -D warnings
 
 # Check formatting + run unit tests + Windows target lint + maintenance script tests
 [unix]
 check: ci windows-lint
-    python3 -m unittest scripts.test_agent_detection_manifest_check scripts.test_changelog scripts.test_config_reference_check scripts.test_docs_translation_parity scripts.test_hermes_integration_asset scripts.test_package_windows_conpty scripts.test_preview scripts.test_socket_api_reference_check scripts.test_vendor_libghostty_vt scripts.test_vendor_portable_pty scripts.test_vendor_upstream_drift
+    python3 -m unittest scripts.test_agent_detection_manifest_check scripts.test_changelog scripts.test_config_reference_check scripts.test_docs_translation_parity scripts.test_hermes_integration_asset scripts.test_package_windows_conpty scripts.test_preview scripts.test_shepherd_release_boundary scripts.test_socket_api_reference_check scripts.test_vendor_libghostty_vt scripts.test_vendor_portable_pty scripts.test_vendor_upstream_drift
     @echo "docs reminder: if this changes user-facing behavior, make sure the relevant release docs are updated or called out before release."
 
 [script("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File")]
@@ -65,8 +65,8 @@ website-build:
 
 # Test bundled agent integration assets
 integration-assets-test:
-    bun test src/integration/assets/herdr-agent-state.test.ts
-    bun test src/integration/assets/opencode/herdr-agent-state.test.ts
+    bun test src/integration/assets/shepherd-agent-state.test.ts
+    bun test src/integration/assets/opencode/shepherd-agent-state.test.ts
 
 # Run plugin marketplace Worker tests
 plugin-marketplace-test:
@@ -137,7 +137,7 @@ release-prepare version:
     python3 scripts/changelog.py prepare --version {{version}}
     cp CHANGELOG.md docs/next/CHANGELOG.md
     sed -i.bak 's/^version = ".*"/version = "{{version}}"/' Cargo.toml && rm -f Cargo.toml.bak
-    cargo update -p herdr --offline
+    cargo update -p shepherd --offline
     just check
     git add CHANGELOG.md docs/next/CHANGELOG.md Cargo.toml Cargo.lock
     git diff --cached --quiet || git commit -m "release: v{{version}}"
@@ -169,8 +169,8 @@ release-publish version:
         exit 1; \
     fi
     just release-docs-check
-    python3 scripts/changelog.py extract --version {{version}} --output /tmp/herdr-release-notes-check.md
-    rm -f /tmp/herdr-release-notes-check.md
+    python3 scripts/changelog.py extract --version {{version}} --output /tmp/shepherd-release-notes-check.md
+    rm -f /tmp/shepherd-release-notes-check.md
     @local_head="$(git rev-parse HEAD)"; \
     remote_head="$(git rev-parse origin/master)"; \
     if ! git merge-base --is-ancestor "$remote_head" "$local_head"; then \

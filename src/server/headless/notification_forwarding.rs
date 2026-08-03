@@ -138,7 +138,7 @@ impl HeadlessServer {
                 })
                 .unwrap_or_else(|_| "{}".to_string());
             }
-            config::ToastDelivery::Herdr => {
+            config::ToastDelivery::Shepherd => {
                 let sound = params.sound;
                 let response = self.app.handle_api_request_after_internal_events_drained(
                     api::schema::Request {

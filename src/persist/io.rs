@@ -124,7 +124,7 @@ pub fn load() -> Option<SessionSnapshot> {
                     warn!(
                         file_version = version,
                         supported = SNAPSHOT_VERSION,
-                        "session file is from a newer herdr version, ignoring"
+                        "session file is from a newer shepherd version, ignoring"
                     );
                     return None;
                 }
@@ -155,7 +155,7 @@ pub fn load_history() -> Option<SessionHistorySnapshot> {
                     warn!(
                         file_version = version,
                         supported = SNAPSHOT_VERSION,
-                        "session history file is from a newer herdr version, ignoring"
+                        "session history file is from a newer shepherd version, ignoring"
                     );
                     return None;
                 }
@@ -175,7 +175,7 @@ mod tests {
 
     fn temp_session_path(name: &str) -> PathBuf {
         let unique = format!(
-            "herdr-session-tests-{}-{}-{}",
+            "shepherd-session-tests-{}-{}-{}",
             name,
             std::process::id(),
             std::time::SystemTime::now()

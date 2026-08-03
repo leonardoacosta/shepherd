@@ -30,17 +30,17 @@ export type EventSubscription = AsyncIterable<EventEnvelope> & {
   close(): void;
 };
 
-export class HerdrApiError extends Error {
+export class ShepherdApiError extends Error {
   response: ErrorResponse;
 
   constructor(response: ErrorResponse) {
     super(response.error.message);
-    this.name = 'HerdrApiError';
+    this.name = 'ShepherdApiError';
     this.response = response;
   }
 }
 
-export class HerdrApiClient {
+export class ShepherdApiClient {
   readonly socketPath: string;
 
   constructor(target: SocketTarget) {
@@ -160,7 +160,7 @@ async function* readJsonLines(socket: net.Socket): AsyncGenerator<JsonValue> {
 
 function parseSuccessResponse(value: JsonValue): SuccessResponse {
   if (isObject(value) && 'error' in value) {
-    throw new HerdrApiError(value as ErrorResponse);
+    throw new ShepherdApiError(value as ErrorResponse);
   }
   return value as SuccessResponse;
 }

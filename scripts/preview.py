@@ -16,8 +16,8 @@ ASSET_TARGETS = (
     "windows-x86_64",
 )
 EXPECTED_ASSET_NAMES = {
-    **{target: f"herdr-{target}" for target in ASSET_TARGETS},
-    "windows-x86_64": "herdr-windows-x86_64.zip",
+    **{target: f"shepherd-{target}" for target in ASSET_TARGETS},
+    "windows-x86_64": "shepherd-windows-x86_64.zip",
 }
 HIDDEN_SUBJECTS = (
     "docs: update website manifest",
@@ -294,18 +294,18 @@ def main() -> int:
     sub = parser.add_subparsers(required=True)
 
     notes = sub.add_parser("notes")
-    notes.add_argument("--manifest", default="website/preview.json")
+    notes.add_argument("--manifest", default="website/shepherd-preview.json")
     notes.add_argument("--previous")
     notes.add_argument("--commit", required=True)
     notes.add_argument("--build-id", required=True)
     notes.add_argument("--base-version", required=True)
-    notes.add_argument("--repo", default="ogulcancelik/herdr")
+    notes.add_argument("--repo", default="leonardoacosta/shepherd")
     notes.add_argument("--output", required=True)
     notes.set_defaults(func=cmd_notes)
 
     manifest = sub.add_parser("manifest")
-    manifest.add_argument("--output", default="website/preview.json")
-    manifest.add_argument("--repo", default="ogulcancelik/herdr")
+    manifest.add_argument("--output", default="website/shepherd-preview.json")
+    manifest.add_argument("--repo", default="leonardoacosta/shepherd")
     manifest.add_argument("--tag", required=True)
     manifest.add_argument("--build-id", required=True)
     manifest.add_argument("--commit", required=True)
@@ -318,7 +318,7 @@ def main() -> int:
     manifest.set_defaults(func=cmd_manifest)
 
     current = sub.add_parser("current-commit")
-    current.add_argument("--manifest", default="website/preview.json")
+    current.add_argument("--manifest", default="website/shepherd-preview.json")
     current.set_defaults(func=cmd_current_commit)
 
     select = sub.add_parser("select-commit")

@@ -376,7 +376,7 @@ impl PtyIoActor {
             poll_observer,
         };
         std::thread::Builder::new()
-            .name(format!("herdr-pty-{}", config.pane_id))
+            .name(format!("shepherd-pty-{}", config.pane_id))
             .spawn(move || {
                 let pane_id = runner.pane_id;
                 let result =

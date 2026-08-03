@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const websiteDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const distDir = resolve(websiteDir, 'dist');
-const nonCanonicalDocsUrl = /https:\/\/herdr\.dev\/(?:ja\/|zh-cn\/)?docs\/(?:preview|\d+\.\d+\.\d+)(?:\/|<)/;
+const nonCanonicalDocsUrl = /https:\/\/shepherd\.dev\/(?:ja\/|zh-cn\/)?docs\/(?:preview|\d+\.\d+\.\d+)(?:\/|<)/;
 const versions = JSON.parse(
   await readFile(resolve(websiteDir, 'src/data/docs-versions.json'), 'utf8'),
 );
@@ -43,7 +43,7 @@ assertIncludes(preview, 'data-pagefind-filter="version[content]" content="previe
 assertIncludes(preview, 'name="robots" content="noindex, nofollow"');
 assertIncludes(archived, `data-pagefind-filter="version[content]" content="${versions.current}"`);
 assertIncludes(archived, 'name="robots" content="noindex, nofollow"');
-if (archived.includes(`This page documents Herdr ${versions.current}`)) {
+if (archived.includes(`This page documents Shepherd ${versions.current}`)) {
   throw new Error('the current immutable snapshot must not be labeled as outdated');
 }
 const versionSelect = stable.match(/<select[^>]*aria-label="Documentation version"[^>]*>([\s\S]*?)<\/select>/)?.[1];
@@ -58,11 +58,11 @@ if (previous) {
     resolve(distDir, 'docs', previous.version, 'index.html'),
     'utf8',
   );
-  assertIncludes(previousArchive, `This page documents Herdr ${previous.version}`);
+  assertIncludes(previousArchive, `This page documents Shepherd ${previous.version}`);
 }
 
 const sitemap = await readFile(resolve(distDir, 'sitemap-0.xml'), 'utf8');
-assertIncludes(sitemap, 'https://herdr.dev/docs/');
+assertIncludes(sitemap, 'https://shepherd.dev/docs/');
 if (nonCanonicalDocsUrl.test(sitemap)) {
   throw new Error('preview or immutable documentation URLs must not appear in the sitemap');
 }

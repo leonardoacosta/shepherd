@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-SCHEMA_PATH = Path("docs/next/api/herdr-api.schema.json")
+SCHEMA_PATH = Path("docs/next/api/shepherd-api.schema.json")
 DOC_PATH = Path("docs/next/website/src/content/docs/socket-api.mdx")
 SKIPPED_METHODS = {
     "pane.graphics.stream_open",

@@ -10,7 +10,7 @@ Windows is a shipped beta (own install script, docs page, ConPTY packaging) but
 the shared codebase is only *compiled* on Windows, never executed under test:
 
 - `scripts/windows_check.ps1:50-68` — Windows `check` mode runs only
-  `cargo test --bin herdr windows_` plus `server::client_transport::tests`. That
+  `cargo test --bin shepherd windows_` plus `server::client_transport::tests`. That
   is ~75 `windows_*` tests plus one module, against ~3,138 `#[test]`/`#[tokio::test]`
   sites repo-wide.
 - `.github/workflows/ci.yml:144` — the windows-latest job invokes only that
@@ -27,7 +27,7 @@ windows panes (#1909)`.
 
 ## What changes
 
-1. Run `cargo nextest run --target x86_64-pc-windows-msvc --bin herdr` unfiltered
+1. Run `cargo nextest run --target x86_64-pc-windows-msvc --bin shepherd` unfiltered
    once (locally or a scratch CI run) and triage results into a pass list and a
    quarantine list.
 2. Make the pass list the Windows CI gate; shrink the quarantine over time.
@@ -47,7 +47,7 @@ windows panes (#1909)`.
 - Fixing every Windows test failure the unfiltered run surfaces — triage first;
   real Windows bugs found this way become their own issues/proposals.
 - Running the integration binaries (`tests/*.rs`) on Windows — that is a larger
-  step; this change is scoped to the in-`herdr`-binary unit suite.
+  step; this change is scoped to the in-`shepherd`-binary unit suite.
 
 ## STOP / judgment
 

@@ -7,7 +7,7 @@ Scope: design spike for socket-level access control (openspec `spike-socket-auth
 ## Current state
 
 Until this spike, file permissions were the entire access-control story on the
-Herdr socket API: `0600` mode on unix, the default DACL on Windows
+Shepherd socket API: `0600` mode on unix, the default DACL on Windows
 (`src/ipc.rs::restrict_socket_permissions`, unix arm `src/ipc.rs:352-356`,
 Windows no-op `src/ipc.rs:358-361`). There was no peer-credential check on
 accept and no per-method authorization anywhere in `src/api/` or
@@ -15,7 +15,7 @@ accept and no per-method authorization anywhere in `src/api/` or
 open the socket and call any method. As the surface gains more powerful
 methods (a possible `pane.output` stream, `plugin.install`, the exec-adjacent
 `server.live_handoff`), "any same-uid process can do anything" is a weaker
-story, and herdr's whole point is hosting agents that are same-uid.
+story, and shepherd's whole point is hosting agents that are same-uid.
 
 ## Platform feasibility finding
 

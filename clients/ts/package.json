@@ -1,5 +1,5 @@
 {
-  "name": "@herdr/api-client",
+  "name": "@shepherd/api-client",
   "private": true,
   "type": "module",
   "scripts": {

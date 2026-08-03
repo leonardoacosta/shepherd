@@ -514,9 +514,12 @@ mod tests {
                 plugin_id: "example.links".into(),
                 name: "Links".into(),
                 version: "0.1.0".into(),
-                min_herdr_version: "0.6.10".into(),
+                min_shepherd_version: "0.6.10".into(),
                 description: None,
-                manifest_path: plugin_root.join("herdr-plugin.toml").display().to_string(),
+                manifest_path: plugin_root
+                    .join("shepherd-plugin.toml")
+                    .display()
+                    .to_string(),
                 plugin_root: plugin_root.display().to_string(),
                 enabled: true,
                 platforms: None,
@@ -878,7 +881,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn ctrl_click_url_does_not_forward_release_to_mouse_reporting_pane() {
-        let line = "see https://github.com/ogulcancelik/herdr/issues/1761";
+        let line = "see https://github.com/leonardoacosta/shepherd/issues/1761";
         let col = line.find("github").expect("url host") as u16;
         let (mut app, info) = app_with_screen_bytes(b"");
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
@@ -926,7 +929,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn ctrl_click_url_invokes_plugin_link_handler_but_super_click_does_not() {
-        let line = "see https://github.com/ogulcancelik/herdr/issues/398";
+        let line = "see https://github.com/leonardoacosta/shepherd/issues/398";
         let col = line.find("github").expect("url host") as u16;
 
         let (mut ctrl_app, ctrl_info) = app_with_screen_bytes(line.as_bytes());
@@ -1459,7 +1462,7 @@ mod tests {
 
         let output_path = unique_temp_path("custom-popup-command");
         let command = format!(
-            "printf '%s|%s' \"${{HERDR_PANE_ID-unset}}\" \"$HERDR_ACTIVE_PANE_ID\" > '{}'",
+            "printf '%s|%s' \"${{SHEPHERD_PANE_ID-unset}}\" \"$SHEPHERD_ACTIVE_PANE_ID\" > '{}'",
             output_path.display()
         );
         app.state.keybinds.custom_commands = vec![crate::config::CustomCommandKeybind {

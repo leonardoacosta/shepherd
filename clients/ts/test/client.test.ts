@@ -8,37 +8,37 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { describe, expect, test } from 'bun:test';
 
-import { HerdrApiClient } from '../src/index';
+import { ShepherdApiClient } from '../src/index';
 
 function createTestBase() {
-  return mkdtempSync(path.join(os.tmpdir(), 'herdr-ts-'));
+  return mkdtempSync(path.join(os.tmpdir(), 'shepherd-ts-'));
 }
 
-function herdrBinPath() {
-  return process.env.HERDR_TS_HERDR_BIN ?? path.resolve(import.meta.dir, '..', '..', '..', 'target', 'debug', 'herdr');
+function shepherdBinPath() {
+  return process.env.SHEPHERD_TS_SHEPHERD_BIN ?? path.resolve(import.meta.dir, '..', '..', '..', 'target', 'debug', 'shepherd');
 }
 
-function spawnHerdrServer(base: string) {
+function spawnShepherdServer(base: string) {
   const configHome = path.join(base, 'config');
   const runtimeDir = path.join(base, 'runtime');
-  const socketPath = path.join(runtimeDir, 'herdr.sock');
+  const socketPath = path.join(runtimeDir, 'shepherd.sock');
 
-  mkdirSync(path.join(configHome, 'herdr'), { recursive: true });
+  mkdirSync(path.join(configHome, 'shepherd'), { recursive: true });
   mkdirSync(runtimeDir, { recursive: true });
-  writeFileSync(path.join(configHome, 'herdr', 'config.toml'), 'onboarding = false\n');
+  writeFileSync(path.join(configHome, 'shepherd', 'config.toml'), 'onboarding = false\n');
 
-  const binaryPath = herdrBinPath();
+  const binaryPath = shepherdBinPath();
   const useBuiltBinary = existsSync(binaryPath);
   const child = spawn(
     useBuiltBinary ? binaryPath : 'cargo',
-    useBuiltBinary ? ['server'] : ['run', '--quiet', '--bin', 'herdr', '--', 'server'],
+    useBuiltBinary ? ['server'] : ['run', '--quiet', '--bin', 'shepherd', '--', 'server'],
     {
       cwd: path.resolve(import.meta.dir, '..', '..', '..'),
       env: {
         ...process.env,
-        HERDR_CLIENT_SOCKET_PATH: '',
-        HERDR_ENV: '',
-        HERDR_SOCKET_PATH: socketPath,
+        SHEPHERD_CLIENT_SOCKET_PATH: '',
+        SHEPHERD_ENV: '',
+        SHEPHERD_SOCKET_PATH: socketPath,
         SHELL: '/bin/sh',
         XDG_CONFIG_HOME: configHome,
         XDG_RUNTIME_DIR: runtimeDir,
@@ -107,15 +107,15 @@ async function readEventsUntil(
   throw new Error(`timed out waiting for events: ${[...remaining].join(', ')}`);
 }
 
-describe('HerdrApiClient', () => {
+describe('ShepherdApiClient', () => {
   test('lists panes and streams workspace lifecycle events', async () => {
     const base = createTestBase();
-    const { child, socketPath } = spawnHerdrServer(base);
+    const { child, socketPath } = spawnShepherdServer(base);
 
     try {
       await waitForSocket(socketPath);
 
-      const client = new HerdrApiClient({ socketPath });
+      const client = new ShepherdApiClient({ socketPath });
       const subscription = await client.subscribe([
         { type: 'workspace.created' },
         { type: 'pane.created' },

@@ -1,6 +1,6 @@
-# `@herdr/api-client`
+# `@shepherd/api-client`
 
-Reference TypeScript client for Herdr's local newline-delimited JSON API.
+Reference TypeScript client for Shepherd's local newline-delimited JSON API.
 
 Regenerate the checked-in schema bindings from the committed API schema with:
 

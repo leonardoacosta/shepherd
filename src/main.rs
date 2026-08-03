@@ -8,14 +8,14 @@ use crossterm::event::{
 use crossterm::event::{PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
 use crossterm::execute;
 
-pub(crate) const HERDR_ENV_VAR: &str = "HERDR_ENV";
-pub(crate) const HERDR_ENV_VALUE: &str = "1";
-const NESTED_HERDR_MESSAGES: [&str; 6] = [
+pub(crate) const SHEPHERD_ENV_VAR: &str = "SHEPHERD_ENV";
+pub(crate) const SHEPHERD_ENV_VALUE: &str = "1";
+const NESTED_SHEPHERD_MESSAGES: [&str; 6] = [
     "inception detected. we need to go deeper... said no one ever.",
     "recursion is a pathway to many abilities some consider to be... unnatural.",
     "you were so preoccupied with whether you could, you didn't stop to think if you should. — dr. malcolm",
-    "recursive herdring is disabled. somewhere, a call stack breathes a sigh of relief.",
-    "recursive descent denied. there is, in fact, such a thing as too much herdr.",
+    "recursive shepherding is disabled. somewhere, a call stack breathes a sigh of relief.",
+    "recursive descent denied. there is, in fact, such a thing as too much shepherd.",
     "recursion detected. base case not found. aborting.",
 ];
 
@@ -102,11 +102,11 @@ mod workspace;
 mod worktree;
 
 fn init_logging() {
-    crate::logging::init_file_logging("herdr.log");
+    crate::logging::init_file_logging("shepherd.log");
 }
 
-const DEFAULT_CONFIG: &str = r##"# herdr configuration
-# Place this file at ~/.config/herdr/config.toml
+const DEFAULT_CONFIG: &str = r##"# shepherd configuration
+# Place this file at ~/.config/shepherd/config.toml
 
 # Show first-run notification setup on startup.
 # Missing also shows onboarding; set false after you've chosen.
@@ -118,7 +118,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 #                  vesper
 # name = "catppuccin"
 
-# Follow host terminal light/dark appearance and switch Herdr UI themes.
+# Follow host terminal light/dark appearance and switch Shepherd UI themes.
 # Existing manual behavior is unchanged unless this is true.
 # auto_switch = false
 # dark_name = "catppuccin"
@@ -143,19 +143,19 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 # CWD policy for new panes, tabs, and workspaces when no explicit --cwd is provided.
 # Use "follow" to inherit the source pane/workspace, "home" for $HOME,
-# "current" for Herdr's process directory, or a fixed path such as "~/Projects".
+# "current" for Shepherd's process directory, or a fixed path such as "~/Projects".
 # new_cwd = "follow"
 
 [update]
-# Update channel used by background version checks and `herdr update`.
+# Update channel used by background version checks and `shepherd update`.
 # Defaults to "stable" on Linux/macOS and "preview" on Windows.
 # Set explicitly to choose stable releases or opt-in preview builds.
 # channel = "stable"
 
-# Check herdr.dev for new Herdr versions in the background.
+# Check shepherd.dev for new Shepherd versions in the background.
 # version_check = true
 
-# Check herdr.dev for remote agent-detection manifest updates in the background.
+# Check shepherd.dev for remote agent-detection manifest updates in the background.
 # manifest_check = true
 
 [keys]
@@ -188,7 +188,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # previous_agent = ""     # optional, unset by default
 # next_agent = ""         # optional, unset by default
 # focus_agent = ""        # optional indexed binding, e.g. "prefix+alt+1..9"
-# remote_image_paste = "ctrl+v" # only active in herdr --remote; empty disables raw-key image paste
+# remote_image_paste = "ctrl+v" # only active in shepherd --remote; empty disables raw-key image paste
 # new_tab = "prefix+c"
 # rename_tab = "prefix+shift+t"
 # previous_tab = "prefix+p"
@@ -242,7 +242,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # agents = ""     # e.g. "alt" makes alt+1..9 focus agent rows directly
 
 # [worktrees]
-# directory = "~/.herdr/worktrees"
+# directory = "~/.shepherd/worktrees"
 
 [ui]
 # Sidebar width (auto-scaled based on workspace names, this sets the default)
@@ -260,11 +260,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Collapsed sidebar presentation: "compact" keeps the narrow status rail, "hidden" uses zero width.
 # sidebar_collapsed_mode = "compact"
 
-# Terminal width at or below which Herdr uses the mobile single-column layout.
+# Terminal width at or below which Shepherd uses the mobile single-column layout.
 # Increase this for foldables, tablets, or wide phone terminals.
 # mobile_width_threshold = 64
 
-# Capture mouse input for Herdr's mouse UI.
+# Capture mouse input for Shepherd's mouse UI.
 # Set false to let the terminal handle normal clicks, such as Cmd-clicking URLs.
 # Pane apps like lazygit and btop can still receive mouse when they request it.
 # mouse_capture = true
@@ -275,16 +275,16 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # copy_on_select = true
 
 # Host cursor policy: "auto", "native", or "drawn".
-# "auto" draws Herdr's own cursor on native Windows builds and WSL to avoid ConPTY cursor flicker, and uses the native terminal cursor elsewhere.
-# "native" always uses the outer terminal cursor. "drawn" always draws Herdr's cursor as terminal cell content.
+# "auto" draws Shepherd's own cursor on native Windows builds and WSL to avoid ConPTY cursor flicker, and uses the native terminal cursor elsewhere.
+# "native" always uses the outer terminal cursor. "drawn" always draws Shepherd's cursor as terminal cell content.
 # host_cursor = "auto"
 
-# Optional modifier that forwards right-click hold/drag gestures to pane apps instead of opening Herdr's pane menu.
+# Optional modifier that forwards right-click hold/drag gestures to pane apps instead of opening Shepherd's pane menu.
 # Empty/off disables this. Shift is intentionally unsupported because terminals commonly reserve Shift+mouse.
 # right_click_passthrough_modifier = ""
 
 # Force a full redraw when the outer terminal regains focus.
-# Set false to reduce visible flashing when switching back to Herdr.
+# Set false to reduce visible flashing when switching back to Shepherd.
 # Trade-off: rare host terminal surface corruption may persist until the next full redraw.
 # redraw_on_focus_gained = true
 
@@ -346,13 +346,13 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Background notification popup delivery
 [ui.toast]
 # off = disable pop-up notifications
-# herdr = show in-app toasts
+# shepherd = show in-app toasts
 # terminal = ask the outer terminal to show a desktop notification
 # system = ask the OS notification service directly
 # delivery = "off"
 # delay_seconds = 1
 
-[ui.toast.herdr]
+[ui.toast.shepherd]
 # position = "bottom-right"
 
 [ui.toast.clipboard]
@@ -374,22 +374,22 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 [session]
 # Resume supported AI-agent panes into their native conversation sessions after
-# a Herdr server restart. Requires official integrations that report session refs.
+# a Shepherd server restart. Requires official integrations that report session refs.
 # resume_agents_on_restore = true
 
 [remote]
-# Whether herdr manages the ssh config used for `herdr --remote`.
-# When true (default), herdr runs remote ssh through a generated config that
+# Whether shepherd manages the ssh config used for `shepherd --remote`.
+# When true (default), shepherd runs remote ssh through a generated config that
 # includes your ~/.ssh/config first and adds ServerAliveInterval/
 # ServerAliveCountMax as fallbacks (so any keepalive values you set yourself
-# still win) to survive idle network/NAT timeouts. Herdr also uses a private
+# still win) to survive idle network/NAT timeouts. Shepherd also uses a private
 # per-attach OpenSSH control socket to reuse the first authenticated connection.
 # Set false to run plain ssh against your ssh config unchanged — this does not
-# force keepalive or multiplexing off, it only stops herdr from adding its own.
+# force keepalive or multiplexing off, it only stops shepherd from adding its own.
 # manage_ssh_config = true
 
 [experimental]
-# Allow launching herdr from inside a herdr-managed pane.
+# Allow launching shepherd from inside a shepherd-managed pane.
 # allow_nested = false
 # Experimental local Kitty graphics rendering for attached clients.
 # Requires a Kitty graphics-compatible outer terminal.
@@ -428,11 +428,11 @@ pane_history = false
 const SKILL: &str = include_str!("../SKILL.md");
 
 fn should_block_nested(config: &config::Config) -> bool {
-    should_block_nested_for_env(config, std::env::var(HERDR_ENV_VAR).ok().as_deref())
+    should_block_nested_for_env(config, std::env::var(SHEPHERD_ENV_VAR).ok().as_deref())
 }
 
-fn should_block_nested_for_env(config: &config::Config, herdr_env: Option<&str>) -> bool {
-    !config.experimental.allow_nested && herdr_env == Some(HERDR_ENV_VALUE)
+fn should_block_nested_for_env(config: &config::Config, shepherd_env: Option<&str>) -> bool {
+    !config.experimental.allow_nested && shepherd_env == Some(SHEPHERD_ENV_VALUE)
 }
 
 fn random_nested_message() -> &'static str {
@@ -442,13 +442,13 @@ fn random_nested_message() -> &'static str {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.subsec_nanos() as usize)
         .unwrap_or(0);
-    let index = (nanos ^ (std::process::id() as usize)) % NESTED_HERDR_MESSAGES.len();
-    NESTED_HERDR_MESSAGES[index]
+    let index = (nanos ^ (std::process::id() as usize)) % NESTED_SHEPHERD_MESSAGES.len();
+    NESTED_SHEPHERD_MESSAGES[index]
 }
 
 fn exit_if_nested_disabled(config: &config::Config) {
     if should_block_nested(config) {
-        eprintln!("\x1b[1merror:\x1b[0m nested herdr is disabled by default.");
+        eprintln!("\x1b[1merror:\x1b[0m nested shepherd is disabled by default.");
         eprintln!("see configuration if you want to enable it.");
         eprintln!();
         eprintln!("\x1b[2m\"{}\"\x1b[0m", random_nested_message());
@@ -462,7 +462,7 @@ fn main() -> io::Result<()> {
         Ok(args) => args,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("run 'shepherd --help' for usage");
             std::process::exit(2);
         }
     };
@@ -470,7 +470,7 @@ fn main() -> io::Result<()> {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("run 'shepherd --help' for usage");
             std::process::exit(2);
         }
     };
@@ -485,7 +485,7 @@ fn main() -> io::Result<()> {
         })
     {
         eprintln!("error: --remote can only be used with the default launch command");
-        eprintln!("run 'herdr --help' for usage");
+        eprintln!("run 'shepherd --help' for usage");
         std::process::exit(2);
     }
 
@@ -521,7 +521,7 @@ fn main() -> io::Result<()> {
             }
             Err(err) => {
                 eprintln!("{err}");
-                eprintln!("usage: herdr update [--handoff]");
+                eprintln!("usage: shepherd update [--handoff]");
                 std::process::exit(2);
             }
         };
@@ -539,90 +539,106 @@ fn main() -> io::Result<()> {
     }
 
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        println!("herdr — terminal workspace manager for AI coding agents");
+        println!("shepherd — terminal workspace manager for AI coding agents");
         println!();
-        println!("Usage: herdr [options]");
-        println!("       herdr --session <name> [options]");
-        println!("       herdr --remote <ssh-target> [--session <name>]");
-        println!("       herdr session attach <name>");
-        println!("       herdr completion zsh");
-        println!("       herdr update [--handoff]");
-        println!("       herdr channel set <stable|preview>");
-        println!("       herdr server stop");
-        println!("       herdr server reload-config");
-        println!("       herdr api <subcommand> ...");
-        println!("       herdr completion <shell>");
-        println!("       herdr config <subcommand> ...");
-        println!("       herdr channel <subcommand> ...");
-        println!("       herdr workspace <subcommand> ...");
-        println!("       herdr worktree <subcommand> ...");
-        println!("       herdr tab <subcommand> ...");
-        println!("       herdr notification <subcommand> ...");
-        println!("       herdr agent <subcommand> ...");
-        println!("       herdr pane <subcommand> ...");
-        println!("       herdr session <subcommand> ...");
-        println!("       herdr integration <subcommand> ...");
+        println!("Usage: shepherd [options]");
+        println!("       shepherd --session <name> [options]");
+        println!("       shepherd --remote <ssh-target> [--session <name>]");
+        println!("       shepherd deploy");
+        println!("       shepherd remote check <ssh-target>");
+        println!("       shepherd session attach <name>");
+        println!("       shepherd completion zsh");
+        println!("       shepherd update [--handoff]");
+        println!("       shepherd channel set <stable|preview>");
+        println!("       shepherd server stop");
+        println!("       shepherd server reload-config");
+        println!("       shepherd api <subcommand> ...");
+        println!("       shepherd completion <shell>");
+        println!("       shepherd config <subcommand> ...");
+        println!("       shepherd channel <subcommand> ...");
+        println!("       shepherd workspace <subcommand> ...");
+        println!("       shepherd worktree <subcommand> ...");
+        println!("       shepherd tab <subcommand> ...");
+        println!("       shepherd notification <subcommand> ...");
+        println!("       shepherd agent <subcommand> ...");
+        println!("       shepherd pane <subcommand> ...");
+        println!("       shepherd session <subcommand> ...");
+        println!("       shepherd integration <subcommand> ...");
         println!();
         println!("Common commands:");
         for (command, description) in [
-            ("herdr", "Launch or attach to the persistent session"),
+            ("shepherd", "Launch or attach to the persistent session"),
             (
-                "herdr status [server|client]",
+                "shepherd status [server|client]",
                 "Show local client and running server status",
             ),
-            ("herdr update", "Download and install the latest version"),
-            ("herdr completion zsh", "Generate shell completions for zsh"),
             (
-                "herdr server stop",
+                "shepherd remote check <target>",
+                "Verify remote Shepherd identity and protocol",
+            ),
+            (
+                "shepherd deploy",
+                "Install locally, then deploy to the configured peer",
+            ),
+            ("shepherd update", "Download and install the latest version"),
+            (
+                "shepherd completion zsh",
+                "Generate shell completions for zsh",
+            ),
+            (
+                "shepherd server stop",
                 "Stop the running server via the API socket",
             ),
             (
-                "herdr channel set <stable|preview>",
+                "shepherd channel set <stable|preview>",
                 "Choose the stable or preview update channel",
             ),
             (
-                "herdr server reload-config",
+                "shepherd server reload-config",
                 "Reload config.toml in the running server",
             ),
             (
-                "herdr config reset-keys",
+                "shepherd config reset-keys",
                 "Back up config.toml and remove custom keybindings",
             ),
             (
-                "herdr channel <subcommand>",
+                "shepherd channel <subcommand>",
                 "Manage the stable or preview update channel",
             ),
             (
-                "herdr api <subcommand>",
+                "shepherd api <subcommand>",
                 "Inspect socket API metadata and live runtime state",
             ),
             (
-                "herdr workspace <subcommand>",
+                "shepherd workspace <subcommand>",
                 "Workspace helpers over the socket API",
             ),
             (
-                "herdr worktree <subcommand>",
+                "shepherd worktree <subcommand>",
                 "Git worktree helpers over the socket API",
             ),
-            ("herdr tab <subcommand>", "Tab helpers over the socket API"),
             (
-                "herdr notification <subcommand>",
+                "shepherd tab <subcommand>",
+                "Tab helpers over the socket API",
+            ),
+            (
+                "shepherd notification <subcommand>",
                 "Notification helpers over the socket API",
             ),
             (
-                "herdr agent <subcommand>",
+                "shepherd agent <subcommand>",
                 "Agent/terminal helpers over the socket API",
             ),
             (
-                "herdr pane <subcommand>",
+                "shepherd pane <subcommand>",
                 "Pane control helpers over the socket API",
             ),
             (
-                "herdr session <subcommand>",
+                "shepherd session <subcommand>",
                 "Manage named persistent sessions",
             ),
             (
-                "herdr integration <subcommand>",
+                "shepherd integration <subcommand>",
                 "Manage built-in agent integrations",
             ),
         ] {
@@ -630,12 +646,12 @@ fn main() -> io::Result<()> {
         }
         println!();
         println!("Advanced commands:");
-        println!("  {:<32} Run as headless server", "herdr server");
+        println!("  {:<32} Run as headless server", "shepherd server");
         println!();
         println!("Options:");
         println!("  --no-session        Run monolithically (no server/client, escape hatch)");
         println!("  --session <name>    Use or create a named persistent session");
-        println!("  --remote <target>   Attach through SSH to a remote Herdr server");
+        println!("  --remote <target>   Attach through SSH to a remote Shepherd server");
         println!("  --remote-keybindings <local|server>");
         println!("                      Keybindings for --remote app attach (default: local)");
         println!("  --handoff           Opt into live handoff for update or remote attach");
@@ -646,14 +662,16 @@ fn main() -> io::Result<()> {
         println!();
         println!("Config: {}", config::config_path().display());
         println!("Logs:   {}", logging::help_log_paths_summary());
-        println!("Env:    HERDR_CONFIG_PATH overrides config file path");
-        println!("Home:   https://herdr.dev");
-        println!("Skill:  herdr --skill prints agent instructions for driving herdr from a pane");
+        println!("Env:    SHEPHERD_CONFIG_PATH overrides config file path");
+        println!("Home:   https://shepherd.dev");
+        println!(
+            "Skill:  shepherd --skill prints agent instructions for driving shepherd from a pane"
+        );
         return Ok(());
     }
 
     if args.iter().any(|a| a == "--version" || a == "-V") {
-        println!("herdr {}", crate::build_info::version());
+        println!("shepherd {}", crate::build_info::version());
         return Ok(());
     }
 
@@ -684,7 +702,7 @@ fn main() -> io::Result<()> {
         let arg_name = arg.split_once('=').map(|(name, _)| name).unwrap_or(arg);
         if arg.starts_with('-') && !known_flags.contains(&arg_name) {
             eprintln!("unknown option: {arg}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("run 'shepherd --help' for usage");
             std::process::exit(2);
         }
         if !arg.starts_with('-')
@@ -705,7 +723,7 @@ fn main() -> io::Result<()> {
             .contains(&arg.as_str())
         {
             eprintln!("unknown command: {arg}");
-            eprintln!("run 'herdr --help' for usage");
+            eprintln!("run 'shepherd --help' for usage");
             std::process::exit(2);
         }
     }
@@ -729,7 +747,7 @@ fn main() -> io::Result<()> {
     // Check if a server is running, spawn one if needed, then attach as client.
     if !no_session {
         if let Err(err) = server::autodetect::auto_detect_launch() {
-            eprintln!("herdr: {err}");
+            eprintln!("shepherd: {err}");
             std::process::exit(1);
         }
         return Ok(());
@@ -745,7 +763,7 @@ fn main() -> io::Result<()> {
     let _api_server = match api::start_server_with_capabilities(api_tx, event_hub.clone(), None) {
         Ok(server) => server,
         Err(err) if err.kind() == io::ErrorKind::AddrInUse => {
-            eprintln!("error: herdr is already running");
+            eprintln!("error: shepherd is already running");
             eprintln!("socket: {}", api::socket_path().display());
             std::process::exit(1);
         }
@@ -859,20 +877,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nested_herdr_blocks_when_env_is_set() {
+    fn nested_shepherd_blocks_when_env_is_set() {
         let config = config::Config::default();
-        assert!(should_block_nested_for_env(&config, Some(HERDR_ENV_VALUE)));
+        assert!(should_block_nested_for_env(
+            &config,
+            Some(SHEPHERD_ENV_VALUE)
+        ));
     }
 
     #[test]
-    fn nested_herdr_does_not_block_when_allowed() {
+    fn nested_shepherd_does_not_block_when_allowed() {
         let config: config::Config =
             toml::from_str("[experimental]\nallow_nested = true\n").unwrap();
-        assert!(!should_block_nested_for_env(&config, Some(HERDR_ENV_VALUE)));
+        assert!(!should_block_nested_for_env(
+            &config,
+            Some(SHEPHERD_ENV_VALUE)
+        ));
     }
 
     #[test]
-    fn nested_herdr_does_not_block_without_env() {
+    fn nested_shepherd_does_not_block_without_env() {
         let config = config::Config::default();
         assert!(!should_block_nested_for_env(&config, None));
     }
@@ -880,13 +904,13 @@ mod tests {
     #[test]
     fn random_nested_message_comes_from_known_set() {
         let message = random_nested_message();
-        assert!(NESTED_HERDR_MESSAGES.contains(&message));
+        assert!(NESTED_SHEPHERD_MESSAGES.contains(&message));
     }
 
     #[test]
-    fn nested_message_strings_no_longer_repeat_herdr_prefix() {
-        assert!(NESTED_HERDR_MESSAGES
+    fn nested_message_strings_no_longer_repeat_shepherd_prefix() {
+        assert!(NESTED_SHEPHERD_MESSAGES
             .iter()
-            .all(|message| !message.starts_with("herdr:")));
+            .all(|message| !message.starts_with("shepherd:")));
     }
 }

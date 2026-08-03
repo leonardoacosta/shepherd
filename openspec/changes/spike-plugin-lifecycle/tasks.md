@@ -22,7 +22,7 @@ re-scope, not another patch to this file.
 Exemplar: `src/detect/manifest_update.rs` is the proven in-repo pattern for the
 *mechanics* (cached remote check, skip-if-unchanged, atomic write of the result) —
 reuse its cache/status-file shape. Its *data source* does NOT transfer: it compares
-`ManifestVersion` (dotted-numeric, parsed from a Herdr-owned `index.toml` keyed by
+`ManifestVersion` (dotted-numeric, parsed from a Shepherd-owned `index.toml` keyed by
 agent) against a cached value, and the plugin marketplace index carries no
 equivalent version field per plugin (see drift check above). `plugin outdated`
 needs its own comparison source — see Step 2.

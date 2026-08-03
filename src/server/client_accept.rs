@@ -205,14 +205,14 @@ mod tests {
         {
             let _ = name;
             PathBuf::from("/tmp").join(format!(
-                "herdr-client-accept-{}-{nanos}.sock",
+                "shepherd-client-accept-{}-{nanos}.sock",
                 std::process::id()
             ))
         }
         #[cfg(windows)]
         {
             std::env::temp_dir().join(format!(
-                "herdr-client-accept-{name}-{}-{nanos}",
+                "shepherd-client-accept-{name}-{}-{nanos}",
                 std::process::id()
             ))
         }

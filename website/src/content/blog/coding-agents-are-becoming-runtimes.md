@@ -66,7 +66,7 @@ The developer-tooling question remains.
 
 > What does a developer actually own: the subscription, the API spend, the model access, or the runtime where the agent works?
 
-When an agent runs in a terminal, it is no longer only a hosted product experience. It is a process in a developer environment. Developers will put that process in Herdr, Zed, tmux, SSH sessions, CI jobs, containers, and scripts. They will supervise it. They will route it. They will build workflows around it.
+When an agent runs in a terminal, it is no longer only a hosted product experience. It is a process in a developer environment. Developers will put that process in Shepherd, Zed, tmux, SSH sessions, CI jobs, containers, and scripts. They will supervise it. They will route it. They will build workflows around it.
 
 **The terminal is where ownership gets shared.**
 
@@ -111,17 +111,17 @@ pi, meanwhile, treats extensibility as a broader system. Its [extension document
 
 Those designs are worth praising because they treat the agent as something other tools can understand.
 
-## What Herdr sees from below
+## What Shepherd sees from below
 
-**Herdr sits below the agent.**
+**Shepherd sits below the agent.**
 
 It owns terminal panes. It keeps processes alive. It lets developers switch between agents, inspect them, recover sessions, and operate multiple agent processes as one workspace.
 
 From that layer, runtime drift becomes very visible.
 
-Herdr's first useful agent detection path was screen reading. If an agent drew "working", "waiting for approval", or "done" in the terminal, Herdr could read the terminal state and classify the pane.
+Shepherd's first useful agent detection path was screen reading. If an agent drew "working", "waiting for approval", or "done" in the terminal, Shepherd could read the terminal state and classify the pane.
 
-That matched what humans saw, which made it useful. It also broke when agent UIs changed. If the fix lived inside the Herdr binary, users needed a full Herdr update just to recognize a new prompt or status line.
+That matched what humans saw, which made it useful. It also broke when agent UIs changed. If the fix lived inside the Shepherd binary, users needed a full Shepherd update just to recognize a new prompt or status line.
 
 Another tempting signal was terminal activity.
 
@@ -134,17 +134,17 @@ Real agents break that quickly. A spinner can redraw while the meaningful state 
 
 Terminal activity is evidence. Lifecycle is stronger.
 
-Herdr now uses better signals where agents expose them, keeps screen evidence as a fallback, and ships hot-reloadable detection manifests so compatibility fixes do not always require a new Herdr binary. That is the practical bridge for today's ecosystem. The durable contract should come from agents themselves.
+Shepherd now uses better signals where agents expose them, keeps screen evidence as a fallback, and ships hot-reloadable detection manifests so compatibility fixes do not always require a new Shepherd binary. That is the practical bridge for today's ecosystem. The durable contract should come from agents themselves.
 
 ## Runtime support should be visible
 
-Herdr can support agents in two broad ways.
+Shepherd can support agents in two broad ways.
 
 Some agents expose reliable lifecycle signals. Those can have verified lifecycle support.
 
 Other agents require observed detection through terminal output, screen evidence, manifests, and heuristics. That can work well, but it depends on UI behavior staying recognizable.
 
-Herdr will publish this as a per-agent support matrix: which agents expose verified lifecycle signals, and which agents require observed detection.
+Shepherd will publish this as a per-agent support matrix: which agents expose verified lifecycle signals, and which agents require observed detection.
 
 **This distinction should be public because it helps everyone.**
 
@@ -168,7 +168,7 @@ Do not make every terminal runtime reverse-engineer every other terminal runtime
 
 Coding agents are becoming infrastructure. The companies building them still own their products, but developers own their environments.
 
-Herdr is built from that position. The terminal is where these agents actually run. The runtime surface belongs to the developer workflow, and vendors share that space whether they design for it or not.
+Shepherd is built from that position. The terminal is where these agents actually run. The runtime surface belongs to the developer workflow, and vendors share that space whether they design for it or not.
 
 The better future is simple: agents should make their basic contracts visible, durable, and boring.
 

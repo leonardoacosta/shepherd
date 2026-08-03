@@ -2,10 +2,10 @@ import { defineConfig } from 'astro/config';
 import sitemap from '@astrojs/sitemap';
 import starlight from '@astrojs/starlight';
 
-const repoBlob = 'https://github.com/ogulcancelik/herdr/blob/master/';
+const repoBlob = 'https://github.com/leonardoacosta/shepherd/blob/master/';
 const nonCanonicalDocsPath = /^\/(?:ja\/|zh-cn\/)?docs\/(?:preview|\d+\.\d+\.\d+)(?:\/|$)/;
 
-function rewriteHerdrLinks() {
+function rewriteShepherdLinks() {
   const docsLinks = new Map([
     ['README.md', '/docs/'],
     ['./README.md', '/docs/'],
@@ -50,7 +50,7 @@ function walk(node, visitor) {
 }
 
 export default defineConfig({
-  site: 'https://herdr.dev',
+  site: 'https://shepherd.dev',
   redirects: {
     '/ja': '/ja/docs/',
     '/zh-cn': '/zh-cn/docs/',
@@ -64,7 +64,7 @@ export default defineConfig({
       },
     }),
     starlight({
-      title: 'herdr',
+      title: 'shepherd',
       description: 'Terminal-native agent runtime and multiplexer.',
       favicon: '/assets/favicon.png?v=14',
       defaultLocale: 'root',
@@ -77,7 +77,7 @@ export default defineConfig({
         {
           icon: 'github',
           label: 'GitHub',
-          href: 'https://github.com/ogulcancelik/herdr',
+          href: 'https://github.com/leonardoacosta/shepherd',
         },
       ],
       components: {
@@ -96,7 +96,7 @@ export default defineConfig({
           tag: 'script',
           content: `(function () {
   try {
-    var KEY = 'herdr-docs-lang';
+    var KEY = 'shepherd-docs-lang';
     var path = location.pathname;
     var m = path.match(/^\\/(ja|zh-cn)(?=\\/|$)/);
     var current = m ? m[1] : path.indexOf('/docs') === 0 ? 'en' : null;
@@ -122,7 +122,7 @@ export default defineConfig({
         },
         {
           tag: 'meta',
-          attrs: { property: 'og:image', content: 'https://herdr.dev/assets/og-card-v8.png' },
+          attrs: { property: 'og:image', content: 'https://shepherd.dev/assets/og-card-v8.png' },
         },
         { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
         { tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
@@ -130,23 +130,23 @@ export default defineConfig({
           tag: 'meta',
           attrs: {
             property: 'og:image:alt',
-            content: 'Herdr documentation — One terminal. The whole herd.',
+            content: 'Shepherd documentation — One terminal. The whole herd.',
           },
         },
         {
           tag: 'meta',
-          attrs: { name: 'twitter:image', content: 'https://herdr.dev/assets/og-card-v8.png' },
+          attrs: { name: 'twitter:image', content: 'https://shepherd.dev/assets/og-card-v8.png' },
         },
         {
           tag: 'meta',
           attrs: {
             name: 'twitter:image:alt',
-            content: 'Herdr documentation — One terminal. The whole herd.',
+            content: 'Shepherd documentation — One terminal. The whole herd.',
           },
         },
       ],
       editLink: {
-        baseUrl: 'https://github.com/ogulcancelik/herdr/edit/master/',
+        baseUrl: 'https://github.com/leonardoacosta/shepherd/edit/master/',
       },
       lastUpdated: true,
       disable404Route: true,
@@ -163,10 +163,10 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Using Herdr',
-          translations: { ja: 'Herdr を使う', 'zh-CN': '使用 Herdr' },
+          label: 'Using Shepherd',
+          translations: { ja: 'Shepherd を使う', 'zh-CN': '使用 Shepherd' },
           items: [
-            { label: 'How to work with Herdr', translations: { ja: 'Herdr での作業の進め方', 'zh-CN': '使用 Herdr 的工作方式' }, slug: 'docs/how-to-work' },
+            { label: 'How to work with Shepherd', translations: { ja: 'Shepherd での作業の進め方', 'zh-CN': '使用 Shepherd 的工作方式' }, slug: 'docs/how-to-work' },
             { label: 'Agents', translations: { ja: 'エージェント', 'zh-CN': '智能体' }, slug: 'docs/agents' },
             { label: 'Agent automation', translations: { ja: 'エージェント自動化', 'zh-CN': '智能体自动化' }, slug: 'docs/agent-automation' },
             { label: 'Session state and restore', translations: { ja: 'セッション状態と復元', 'zh-CN': '会话状态与恢复' }, slug: 'docs/session-state' },
@@ -206,6 +206,6 @@ export default defineConfig({
     }),
   ],
   markdown: {
-    remarkPlugins: [rewriteHerdrLinks],
+    remarkPlugins: [rewriteShepherdLinks],
   },
 });

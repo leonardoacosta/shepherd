@@ -5,9 +5,9 @@ use std::sync::MutexGuard;
 
 use portable_pty::CommandBuilder;
 
-pub(crate) const HERDR_PANE_ID_ENV_VAR: &str = "HERDR_PANE_ID";
-pub(crate) const HERDR_TAB_ID_ENV_VAR: &str = "HERDR_TAB_ID";
-pub(crate) const HERDR_WORKSPACE_ID_ENV_VAR: &str = "HERDR_WORKSPACE_ID";
+pub(crate) const SHEPHERD_PANE_ID_ENV_VAR: &str = "SHEPHERD_PANE_ID";
+pub(crate) const SHEPHERD_TAB_ID_ENV_VAR: &str = "SHEPHERD_TAB_ID";
+pub(crate) const SHEPHERD_WORKSPACE_ID_ENV_VAR: &str = "SHEPHERD_WORKSPACE_ID";
 
 pub(crate) const PI_CODING_AGENT_DIR_ENV_VAR: &str = "PI_CODING_AGENT_DIR";
 pub(crate) const OMP_CONFIG_DIR_ENV_VAR: &str = "PI_CONFIG_DIR";
@@ -143,7 +143,7 @@ pub(crate) fn mastracode_dir() -> io::Result<PathBuf> {
 }
 
 pub(crate) fn grok_dir() -> io::Result<PathBuf> {
-    // GROK_CONFIG_DIR is a herdr-level override only (primarily a test
+    // GROK_CONFIG_DIR is a shepherd-level override only (primarily a test
     // seam); the grok CLI does not honor it, so it stays first and explicit.
     if let Some(value) = std::env::var_os(GROK_CONFIG_DIR_ENV_VAR).filter(|value| !value.is_empty())
     {

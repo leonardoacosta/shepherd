@@ -1,11 +1,11 @@
 # Sponsors
 
-herdr is independent, open source, and built full-time.
-Every sponsorship goes directly toward development, stability, and reaching herdr's
+shepherd is independent, open source, and built full-time.
+Every sponsorship goes directly toward development, stability, and reaching shepherd's
 goal of becoming the runtime for coding agents.
 
 → Sponsor: https://github.com/sponsors/ogulcancelik
-→ Enterprise / partnership: hey@herdr.dev
+→ Enterprise / partnership: hey@shepherd.dev
 
 ## Tiers
 
@@ -13,9 +13,9 @@ goal of becoming the runtime for coding agents.
 |------|--------|-------------|
 | Backer | $25/mo | Name + link in this file |
 | Gold | $500/mo | Logo in README |
-| Platinum | $2,500/mo | Logo in README and on herdr.dev |
-| Lead Sponsor | $5,000/mo | Top logo — README and herdr.dev hero placement |
-| Enterprise | custom | hey@herdr.dev |
+| Platinum | $2,500/mo | Logo in README and on shepherd.dev |
+| Lead Sponsor | $5,000/mo | Top logo — README and shepherd.dev hero placement |
+| Enterprise | custom | hey@shepherd.dev |
 
 GitHub also allows a custom amount, so a sponsor lands in the tier their amount
 qualifies for.
@@ -70,4 +70,4 @@ qualifies for.
 
 ---
 
-Thank you to everyone who supports herdr. The herd keeps moving because of you. 🐑
+Thank you to everyone who supports shepherd. The herd keeps moving because of you. 🐑

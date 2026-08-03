@@ -1,12 +1,12 @@
 name: Bug report
-description: Report a reproducible bug in herdr.
+description: Report a reproducible bug in shepherd.
 body:
   - type: markdown
     attributes:
       value: |
-        **Before you start:** Read [CONTRIBUTING.md](https://github.com/ogulcancelik/herdr/blob/master/CONTRIBUTING.md).
+        **Before you start:** Read [CONTRIBUTING.md](https://github.com/leonardoacosta/shepherd/blob/master/CONTRIBUTING.md).
 
-        Issues are only for reproducible bugs and maintainer-created or maintainer-converted work items. Feature requests, ideas, questions, contribution proposals, and direction checks belong in [Discussions](https://github.com/ogulcancelik/herdr/discussions).
+        Issues are only for reproducible bugs and maintainer-created or maintainer-converted work items. Feature requests, ideas, questions, contribution proposals, and direction checks belong in [Discussions](https://github.com/leonardoacosta/shepherd/discussions).
 
         Unapproved contributors may open focused bug-fix PRs when the title uses `fix: ...` or `fix(scope): ...` and the patch changes no more than 20 files and 1,000 total added or deleted lines. Features and larger changes require maintainer approval first.
 
@@ -63,9 +63,9 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: Herdr version, update channel, operating system, and terminal are required. Shell and relevant config are optional.
+      description: Shepherd version, update channel, operating system, and terminal are required. Shell and relevant config are optional.
       value: |
-        - Herdr version:
+        - Shepherd version:
         - Update channel (stable or preview):
         - Operating system:
         - Terminal:

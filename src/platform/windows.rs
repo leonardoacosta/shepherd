@@ -811,7 +811,7 @@ fn read_unicode_string(process: HANDLE, unicode: UNICODE_STRING) -> Option<Strin
 
 // Prefix-mode ASCII input source support (see `switch_ascii_input_source_in_prefix`).
 //
-// Windows IMEs live in the terminal-emulator process, not in herdr. Empirically:
+// Windows IMEs live in the terminal-emulator process, not in shepherd. Empirically:
 //   - `WM_IME_CONTROL` / `IMC_GETOPENSTATUS` reads whether the IME is open
 //     (composing native characters) reliably across the process boundary (this
 //     is what kren-select uses), so we detect state with it. The read goes
@@ -855,7 +855,7 @@ const IME_STATUS_READ_TIMEOUT_MS: u32 = 200;
 /// Reads the IME open status (`IMC_GETOPENSTATUS`) with a bounded timeout.
 ///
 /// `WM_IME_CONTROL` crosses into the terminal-emulator process, and a plain
-/// `SendMessageW` would block herdr's client thread until that process responds
+/// `SendMessageW` would block shepherd's client thread until that process responds
 /// (indefinitely if it is hung). `SendMessageTimeoutW` with `SMTO_ABORTIFHUNG`
 /// caps the wait; on timeout or failure this returns `None` and callers leave
 /// the IME untouched rather than blocking or guessing.
@@ -1158,7 +1158,7 @@ mod tests {
     fn windows_shells_round_trip_agent_arguments_through_a_real_command() {
         let _lock = crate::integration::integration_env_lock();
         let base = std::env::temp_dir().join(format!(
-            "herdr-agent-argv-{}-{}",
+            "shepherd-agent-argv-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1169,7 +1169,7 @@ mod tests {
         let helper = base.join("pi.cmd");
         fs::write(
             &helper,
-            "@echo off\r\n>\"%HERDR_ARGV_CAPTURE%\" (\r\necho(%~1\r\necho(%~2\r\necho(%~3\r\necho(%~4\r\necho(%~5\r\necho(%~6\r\n)\r\n",
+            "@echo off\r\n>\"%SHEPHERD_ARGV_CAPTURE%\" (\r\necho(%~1\r\necho(%~2\r\necho(%~3\r\necho(%~4\r\necho(%~5\r\necho(%~6\r\n)\r\n",
         )
         .unwrap();
         let argv = vec![
@@ -1191,14 +1191,14 @@ mod tests {
                 Command::new("cmd.exe")
                     .args(["/d", "/c", &command])
                     .env("PATH", &path)
-                    .env("HERDR_ARGV_CAPTURE", &capture)
+                    .env("SHEPHERD_ARGV_CAPTURE", &capture)
                     .status()
                     .unwrap()
             } else {
                 Command::new("powershell.exe")
                     .args(["-NoLogo", "-NoProfile", "-Command", &command])
                     .env("PATH", &path)
-                    .env("HERDR_ARGV_CAPTURE", &capture)
+                    .env("SHEPHERD_ARGV_CAPTURE", &capture)
                     .status()
                     .unwrap()
             };
@@ -1212,8 +1212,8 @@ mod tests {
         let _ = fs::remove_dir_all(base);
     }
 
-    const CONSOLE_TEST_CHILD_ENV: &str = "HERDR_TEST_CONSOLE_CHILD_MODE";
-    const CONSOLE_TEST_PARENT_PID_ENV: &str = "HERDR_TEST_CONSOLE_PARENT_PID";
+    const CONSOLE_TEST_CHILD_ENV: &str = "SHEPHERD_TEST_CONSOLE_CHILD_MODE";
+    const CONSOLE_TEST_PARENT_PID_ENV: &str = "SHEPHERD_TEST_CONSOLE_PARENT_PID";
 
     fn console_process_ids() -> Vec<u32> {
         let mut process_ids = vec![0; 8];
@@ -1360,7 +1360,7 @@ mod tests {
     #[test]
     fn detached_custom_command_preserves_quoted_command_tail() {
         let path = std::env::temp_dir().join(format!(
-            "herdr-raw-command-quotes-{}.txt",
+            "shepherd-raw-command-quotes-{}.txt",
             std::process::id()
         ));
         let command = format!(r#"echo "hi" > "{}""#, path.display());
@@ -1378,7 +1378,7 @@ mod tests {
 
     #[test]
     fn windows_process_cwd_reads_child_launch_directory() {
-        let cwd = std::env::temp_dir().join(format!("herdr-cwd-test-{}", std::process::id()));
+        let cwd = std::env::temp_dir().join(format!("shepherd-cwd-test-{}", std::process::id()));
         fs::create_dir_all(&cwd).expect("create cwd fixture");
 
         let shell =
@@ -1461,7 +1461,7 @@ mod tests {
                 "node.exe",
                 &[
                     "node.exe",
-                    "C:\\Users\\herdr\\AppData\\Roaming\\npm\\node_modules\\codex\\bin\\codex.js",
+                    "C:\\Users\\shepherd\\AppData\\Roaming\\npm\\node_modules\\codex\\bin\\codex.js",
                 ],
             ),
         ];
@@ -1485,7 +1485,7 @@ mod tests {
                     "/D",
                     "/S",
                     "/C",
-                    "C:\\Users\\herdr\\AppData\\Roaming\\npm\\codex.cmd --model gpt-5",
+                    "C:\\Users\\shepherd\\AppData\\Roaming\\npm\\codex.cmd --model gpt-5",
                 ],
             ),
         ];
@@ -1506,14 +1506,14 @@ mod tests {
                 "node.exe",
                 &[
                     "node.exe",
-                    "C:\\Users\\herdr\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js",
+                    "C:\\Users\\shepherd\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js",
                 ],
             ),
             test_entry(
                 30,
                 20,
                 "codex.exe",
-                &["C:\\Users\\herdr\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe"],
+                &["C:\\Users\\shepherd\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe"],
             ),
             test_entry(40, 30, "node_repl.exe", &["node_repl.exe"]),
             test_entry(
@@ -1657,7 +1657,8 @@ mod tests {
 
     #[test]
     fn scrollback_editor_argv_uses_editor_env_and_appends_path() {
-        let path = std::path::Path::new(r"C:\Users\User\AppData\Local\Temp\herdr scrollback.txt");
+        let path =
+            std::path::Path::new(r"C:\Users\User\AppData\Local\Temp\shepherd scrollback.txt");
         let argv = super::scrollback_editor_argv_with_env(
             path,
             Some(r#""C:\Program Files\Microsoft VS Code\Code.exe" --wait"#),
@@ -1671,7 +1672,7 @@ mod tests {
 
     #[test]
     fn scrollback_editor_argv_falls_back_to_notepad() {
-        let path = std::path::Path::new(r"C:\Temp\herdr-scrollback.txt");
+        let path = std::path::Path::new(r"C:\Temp\shepherd-scrollback.txt");
         let argv = super::scrollback_editor_argv_with_env(path, None).unwrap();
 
         assert_eq!(

@@ -8,12 +8,12 @@ import { compile } from 'json-schema-to-typescript';
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const packageDir = path.resolve(scriptDir, '..');
 const repoRoot = path.resolve(packageDir, '..', '..');
-const schemaPath = path.join(repoRoot, 'docs', 'next', 'api', 'herdr-api.schema.json');
+const schemaPath = path.join(repoRoot, 'docs', 'next', 'api', 'shepherd-api.schema.json');
 const outputPath = path.join(packageDir, 'src', 'generated', 'schema.ts');
 const checkMode = process.argv.includes('--check');
 
 const header = [
-  '// Generated from docs/next/api/herdr-api.schema.json.',
+  '// Generated from docs/next/api/shepherd-api.schema.json.',
   '// Do not edit by hand.',
   '',
 ].join('\n');

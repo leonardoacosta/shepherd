@@ -12,7 +12,7 @@ target for maintainers.
 ## Ordered steps
 
 1. **Measure.** On a Windows target, run
-   `cargo nextest run --target x86_64-pc-windows-msvc --bin herdr` unfiltered.
+   `cargo nextest run --target x86_64-pc-windows-msvc --bin shepherd` unfiltered.
    Capture the full pass/fail/timeout list.
 
 2. **Triage.** Split failures into: (a) genuinely Windows-inapplicable, (b) real

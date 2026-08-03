@@ -7,6 +7,7 @@ use crate::popup_size::PopupSize;
 
 const PLUGIN_ID_MAX_CHARS: usize = 120;
 const PLUGIN_ACTION_ID_MAX_CHARS: usize = 120;
+const PLUGIN_MANIFEST_FILE_NAME: &str = "shepherd-plugin.toml";
 
 #[derive(serde::Deserialize)]
 struct RawPluginManifest {
@@ -14,7 +15,7 @@ struct RawPluginManifest {
     name: String,
     version: String,
     #[serde(default)]
-    min_herdr_version: Option<String>,
+    min_shepherd_version: Option<String>,
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]
@@ -121,8 +122,17 @@ pub(crate) fn load_plugin_manifest(
 ) -> Result<InstalledPluginInfo, (&'static str, String)> {
     let path = std::path::PathBuf::from(path);
     let manifest_path = if path.is_dir() {
-        path.join("herdr-plugin.toml")
+        path.join(PLUGIN_MANIFEST_FILE_NAME)
     } else {
+        if path
+            .file_name()
+            .is_none_or(|name| name != PLUGIN_MANIFEST_FILE_NAME)
+        {
+            return Err((
+                "invalid_plugin_manifest_path",
+                format!("plugin manifest must be named {PLUGIN_MANIFEST_FILE_NAME}"),
+            ));
+        }
         path
     };
     let manifest_path = manifest_path
@@ -149,7 +159,7 @@ pub(crate) fn load_plugin_manifest(
         "invalid_plugin_version",
         "plugin version is required",
     )?;
-    let min_herdr_version = validate_min_herdr_version(raw.min_herdr_version.as_deref())?;
+    let min_shepherd_version = validate_min_shepherd_version(raw.min_shepherd_version.as_deref())?;
     let description = raw
         .description
         .map(|description| description.trim().to_string())
@@ -209,7 +219,7 @@ pub(crate) fn load_plugin_manifest(
         plugin_id,
         name,
         version,
-        min_herdr_version,
+        min_shepherd_version,
         description,
         manifest_path: manifest_path.display().to_string(),
         plugin_root: plugin_root.display().to_string(),
@@ -226,23 +236,23 @@ pub(crate) fn load_plugin_manifest(
     })
 }
 
-fn validate_min_herdr_version(value: Option<&str>) -> Result<String, (&'static str, String)> {
+fn validate_min_shepherd_version(value: Option<&str>) -> Result<String, (&'static str, String)> {
     let Some(value) = value else {
         return Err((
-            "invalid_plugin_min_herdr_version",
-            "plugin min_herdr_version is required".to_string(),
+            "invalid_plugin_min_shepherd_version",
+            "plugin min_shepherd_version is required".to_string(),
         ));
     };
     let value = non_empty_trimmed(
         value,
-        "invalid_plugin_min_herdr_version",
-        "plugin min_herdr_version is required",
+        "invalid_plugin_min_shepherd_version",
+        "plugin min_shepherd_version is required",
     )?;
     let required = crate::update::Version::parse(&value).ok_or_else(|| {
         (
-            "invalid_plugin_min_herdr_version",
+            "invalid_plugin_min_shepherd_version",
             format!(
-                "plugin min_herdr_version must be a semantic version like {}",
+                "plugin min_shepherd_version must be a semantic version like {}",
                 crate::build_info::BASE_VERSION
             ),
         )
@@ -250,8 +260,8 @@ fn validate_min_herdr_version(value: Option<&str>) -> Result<String, (&'static s
     let current = crate::update::Version::current();
     if required > current {
         return Err((
-            "plugin_requires_newer_herdr",
-            format!("plugin requires Herdr {required} or newer; current Herdr is {current}"),
+            "plugin_requires_newer_shepherd",
+            format!("plugin requires Shepherd {required} or newer; current Shepherd is {current}"),
         ));
     }
     Ok(required.to_string())
@@ -607,4 +617,92 @@ fn normalize_local_identifier(value: &str, max_chars: usize) -> Option<String> {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'_' | b'-')))
     .then(|| value.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_root(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "shepherd-plugin-manifest-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock after unix epoch")
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn shepherd_manifest_uses_min_shepherd_version() {
+        let root = test_root("minimum-version");
+        std::fs::create_dir_all(&root).expect("create plugin root");
+        std::fs::write(
+            root.join("shepherd-plugin.toml"),
+            r#"
+id = "example.shepherd"
+name = "Shepherd example"
+version = "0.1.0"
+min_shepherd_version = "0.1.0"
+"#,
+        )
+        .expect("write shepherd manifest");
+
+        let plugin = load_plugin_manifest(&root.display().to_string(), true)
+            .expect("discover shepherd manifest");
+        assert_eq!(plugin.plugin_id, "example.shepherd");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn legacy_manifest_is_not_a_discovery_fallback() {
+        let root = test_root("legacy-only");
+        let legacy_manifest = ["he", "rdr-plugin.toml"].concat();
+        let legacy_version_field = ["min_", "he", "rdr_version"].concat();
+        std::fs::create_dir_all(&root).expect("create plugin root");
+        std::fs::write(
+            root.join(&legacy_manifest),
+            format!(
+                "id = \"example.legacy\"\nname = \"Legacy example\"\nversion = \"0.1.0\"\n{legacy_version_field} = \"0.1.0\"\n"
+            ),
+        )
+        .expect("write legacy manifest");
+
+        let result = load_plugin_manifest(&root.display().to_string(), true);
+        assert_eq!(
+            result.map(|_| ()).unwrap_err().0,
+            "plugin_manifest_not_found"
+        );
+        let result = load_plugin_manifest(&root.join(&legacy_manifest).display().to_string(), true);
+        assert_eq!(
+            result.map(|_| ()).unwrap_err().0,
+            "invalid_plugin_manifest_path"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn legacy_version_field_is_not_accepted() {
+        let root = test_root("legacy-version-field");
+        let legacy_version_field = ["min_", "he", "rdr_version"].concat();
+        std::fs::create_dir_all(&root).expect("create plugin root");
+        std::fs::write(
+            root.join(PLUGIN_MANIFEST_FILE_NAME),
+            format!(
+                "id = \"example.legacy-field\"\nname = \"Legacy field\"\nversion = \"0.1.0\"\n{legacy_version_field} = \"0.1.0\"\n"
+            ),
+        )
+        .expect("write manifest with retired field");
+
+        let result = load_plugin_manifest(&root.display().to_string(), true);
+        assert_eq!(
+            result.map(|_| ()).unwrap_err().0,
+            "invalid_plugin_min_shepherd_version"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

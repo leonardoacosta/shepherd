@@ -1,4 +1,4 @@
-// Generated from docs/next/api/herdr-api.schema.json.
+// Generated from docs/next/api/shepherd-api.schema.json.
 // Do not edit by hand.
 export type Request = {
   id: string;

@@ -1,4 +1,4 @@
-# OpenSpec — herdr change proposals
+# OpenSpec — shepherd change proposals
 
 This directory holds draft change proposals produced by an advisory audit. Each
 subdirectory under `changes/` is one proposed change: a self-contained

@@ -1,15 +1,15 @@
 #!/bin/sh
 set -eu
 
-BIN="herdr"
-MANIFEST_URL="https://herdr.dev/latest.json"
-INSTALL_DIR="${HERDR_INSTALL_DIR:-$HOME/.local/bin}"
+BIN="shepherd"
+MANIFEST_URL="https://shepherd.dev/shepherd-latest.json"
+INSTALL_DIR="${SHEPHERD_INSTALL_DIR:-$HOME/.local/bin}"
 
 main() {
     echo ""
     echo "      ,ww"
-    echo "     wWWWWWWW_)  herdr installer"
-    echo "     \`WWWWWW'    herdr.dev"
+    echo "     wWWWWWWW_)  shepherd installer"
+    echo "     \`WWWWWW'    shepherd.dev"
     echo "      II  II"
     echo ""
 
@@ -32,12 +32,12 @@ main() {
 
     TARGET="${os}-${arch}"
     MANIFEST="$(curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 --connect-timeout 10 --max-time 20 "$MANIFEST_URL")" \
-        || err "can't reach ${MANIFEST_URL}. Please try again later; herdr.dev might be down. Who let the sheeps out? baaa."
+        || err "can't reach ${MANIFEST_URL}. Please try again later; shepherd.dev might be down. Who let the sheeps out? baaa."
     URL="$(asset_field "$MANIFEST" "$TARGET" "url")"
     SHA256="$(asset_field "$MANIFEST" "$TARGET" "sha256")"
     VERSION="$(printf '%s\n' "$MANIFEST" | awk -F '"' '/^[[:space:]]*"version"[[:space:]]*:/ { print $4; exit }')"
 
-    [ -n "$URL" ] || err "release manifest does not include a binary for ${TARGET}"
+    [ -n "$URL" ] || err "no Shepherd binary release exists for ${TARGET}; use the installfest-owned shepherd-install source build"
     [ -n "$SHA256" ] || err "release manifest does not include a sha256 for ${TARGET}"
 
     case "$URL" in
@@ -83,7 +83,7 @@ main() {
     fi
 
     if command -v "$BIN" >/dev/null 2>&1; then
-        log "run '${BIN}' to launch Herdr"
+        log "run '${BIN}' to launch Shepherd"
     fi
 }
 
@@ -119,12 +119,12 @@ checksum_file() {
         shasum -a 256 "$path" | awk '{print $1}'
         return
     fi
-    err "requires 'sha256sum' or 'shasum' — install one first, or download a binary manually from https://herdr.dev/docs/install/"
+    err "requires 'sha256sum' or 'shasum' — install one first, or download a binary manually from https://shepherd.dev/docs/install/"
 }
 
 need() {
     if ! command -v "$1" >/dev/null 2>&1; then
-        err "requires '$1' — install it first, or download a binary manually from https://herdr.dev/docs/install/"
+        err "requires '$1' — install it first, or download a binary manually from https://shepherd.dev/docs/install/"
     fi
 }
 
