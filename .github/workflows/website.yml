@@ -9,7 +9,7 @@ on:
       - "docs/versions/**"
       - "scripts/test_preview.py"
   push:
-    branches: [master]
+    branches: [dev, master]
     paths:
       - ".github/workflows/website.yml"
       - "website/**"

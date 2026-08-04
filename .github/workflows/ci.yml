@@ -4,7 +4,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   push:
-    branches: [master, windows]
+    branches: [dev, master, windows]
     paths-ignore:
       - "website/**"
       - ".github/APPROVED_CONTRIBUTORS"
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   conventional-commits:
-    if: github.event_name != 'push' || github.ref_name == 'master'
+    if: github.event_name != 'push' || github.ref_name == 'master' || github.ref_name == 'dev'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -42,7 +42,7 @@ jobs:
         run: python3 scripts/conventional_commits.py "$PR_TITLE"
 
   maintenance:
-    if: github.event_name != 'push' || github.ref_name == 'master'
+    if: github.event_name != 'push' || github.ref_name == 'master' || github.ref_name == 'dev'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -77,6 +77,7 @@ jobs:
             scripts.test_hermes_integration_asset \
             scripts.test_package_windows_conpty \
             scripts.test_preview \
+            scripts.test_shepherd_release_boundary \
             scripts.test_socket_api_reference_check \
             scripts.test_vendor_libghostty_vt \
             scripts.test_vendor_portable_pty \

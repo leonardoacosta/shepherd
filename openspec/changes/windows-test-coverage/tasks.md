@@ -1,39 +1,25 @@
-# Tasks — windows-test-coverage
+## 1. Measure the current Windows unit boundary
 
-Base commit: `1de05dc2`. Drift check: confirm `scripts/windows_check.ps1:50-68`
-still filters `cargo test` to `windows_` + `server::client_transport::tests`. If
-the Windows CI already runs a broader suite, STOP and report.
+- [ ] 1.1 Sync the approved tree to the maintained Windows VM checkout at `C:\work\repo`, run the complete `shepherd` binary unit suite without the current name filters, and capture exact pass, fail, and timeout evidence. Run `cargo test --target x86_64-pc-windows-msvc --bin shepherd -- --list` followed by the unfiltered binary test command; expected result: the complete inventory and runtime outcome are recorded before gate edits.
+  - touches: none (Windows measurement only)
+  - depends on: []
 
-Exemplar: `scripts/windows_check.ps1` current `Invoke-Checked cargo @(...)` calls
-— the invocation shape to extend. This work needs a Windows environment; per
-AGENTS.md the Windows VM (`windows-wirt` alias, `C:\work\repo`) is the validation
-target for maintainers.
+- [ ] 1.2 Classify every observed failure as Windows-inapplicable, a product defect, or a demonstrated flake, and record an exact test name plus one-line reason and follow-up owner for each quarantine candidate. Expected result: no broad module or substring exclusion is proposed without itemized evidence.
+  - touches: planning notes under `.local/` or the eventual quarantine comments in `scripts/windows_check.ps1`
+  - depends on: 1.1
 
-## Ordered steps
+## 2. Expand portable Windows execution
 
-1. **Measure.** On a Windows target, run
-   `cargo nextest run --target x86_64-pc-windows-msvc --bin shepherd` unfiltered.
-   Capture the full pass/fail/timeout list.
+- [ ] 2.1 Audit the modules still using `#[cfg(all(test, unix))]`, move platform gates to the narrowest imports, helpers, or individual tests, and rerun the affected tests on Windows. Expected result: portable tests compile and run on Windows while genuinely Unix-only tests remain gated.
+  - touches: `src/api/server.rs`, `src/pane.rs`, `src/platform/mod.rs`, `src/server/socket_paths.rs`, `src/server/autodetect.rs`, `src/client/input.rs`, `src/update.rs`
+  - depends on: 1.2
 
-2. **Triage.** Split failures into: (a) genuinely Windows-inapplicable, (b) real
-   Windows bugs (file separately as issues/proposals), (c) flaky. Build a pass
-   list and a quarantine list with a one-line reason per quarantined test.
+- [ ] 2.2 Replace the narrow filters in `scripts/windows_check.ps1` with the measured broad passing suite minus exact reasoned quarantines; use deterministic shards if the full gate exceeds the job budget. Run the script's `check` mode on the Windows VM; expected result: materially more unit tests execute and every exclusion is visible and explained.
+  - touches: `scripts/windows_check.ps1`
+  - depends on: 1.2, 2.1
 
-3. **Re-gate portable tests.** For the seven `#[cfg(all(test, unix))]` modules,
-   identify tests with no unix-specific dependency and change their gating to
-   per-test (or unconditional) so they compile+run on Windows.
+## 3. Verify the gate
 
-4. **Update the CI gate.** Change `windows_check.ps1` to run the pass list
-   (e.g. via a nextest filter expression or a partition) instead of only
-   `windows_`. Keep the quarantine excluded but documented.
-   - Gate: Windows CI job green on the new pass list.
-
-5. **Verify and close.**
-   - `just check` still green (unix + windows-target clippy). done-when: proposal
-     `windows-test-coverage` archived.
-
-## STOP conditions
-
-- If the unfiltered run cannot complete within a reasonable CI budget even
-  sharded, report the numbers and the maintainer decides the coverage/time
-  tradeoff before gating.
+- [ ] 3.1 Run the updated Windows check in `C:\work\repo`, confirm the Windows CI job shape remains compatible, restore the VM checkout to clean state, and run `just check` on Linux. Expected result: the broad Windows gate and repository-wide validation both pass.
+  - touches: none (validation and VM cleanup)
+  - depends on: 2.2

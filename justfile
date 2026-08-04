@@ -118,8 +118,16 @@ release-docs-check:
     python3 scripts/docs_translation_parity.py --docs-root website/src/content/docs
     just website-build
 
+# Fail before either release phase can mutate a non-publication branch.
+release-branch-check:
+    @branch="$(git branch --show-current)"; \
+    if [ "$branch" != "master" ]; then \
+        echo "error: stable release commands must run from master, got $branch"; \
+        exit 1; \
+    fi
+
 # Prepare the release commit without tagging or pushing (usage: just release-prepare 0.1.1)
-release-prepare version:
+release-prepare version: release-branch-check
     @printf '%s\n' '{{version}}' | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { \
         echo "error: version must look like 0.6.6 without a v prefix"; \
         exit 1; \
@@ -144,18 +152,13 @@ release-prepare version:
     @echo "v{{version}} release commit prepared. Review it, then run: just release-publish {{version}}"
 
 # Tag and push an already-prepared release commit (usage: just release-publish 0.1.1)
-release-publish version:
+release-publish version: release-branch-check
     @printf '%s\n' '{{version}}' | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { \
         echo "error: version must look like 0.6.6 without a v prefix"; \
         exit 1; \
     }
     @if [ -n "$(git status --porcelain)" ]; then \
         echo "error: working tree must be clean before publishing"; \
-        exit 1; \
-    fi
-    @branch="$(git branch --show-current)"; \
-    if [ "$branch" != "master" ]; then \
-        echo "error: release-publish must run from master, got $branch"; \
         exit 1; \
     fi
     @git fetch origin master --tags

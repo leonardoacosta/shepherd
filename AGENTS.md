@@ -60,6 +60,10 @@ contributor guardrail.
 
 ### Direct maintainer workflow
 
+In this fork, `dev` is the integration branch and `master` is the stable publication branch.
+Normal implementation work lands directly on `dev`; `master` changes only through the stable
+release flow described under Release Channels.
+
 Work directly in the shared integration checkout on its current integration branch. Do not create
 a task branch, clone, or worktree unless the human explicitly requests isolation for that task.
 
@@ -190,7 +194,8 @@ account is not a verified maintainer, do not run release commands, push release
 assets, or modify release channel files; follow the external contributor
 guardrail.
 
-Shepherd has one main branch and two update channels. Stable and preview both build from `master`; there is no long-lived preview branch.
+Shepherd has one integration branch and two update channels. Stable and preview both build from
+the `master` publication branch; there is no long-lived preview branch.
 
 Normal users default to stable. Stable docs are `/docs/`, stable updates use `website/latest.json`, and Homebrew/Nix stay stable-only.
 
@@ -213,9 +218,15 @@ Preview releases are GitHub prereleases produced by `.github/workflows/preview.y
 Stable releases use:
 
 ```bash
+git fetch origin dev master --tags
+git switch master
+git merge --ff-only origin/dev
 just check
 just release 0.x.y
 ```
+
+If the fast-forward fails, stop and bring the `origin/master` publication history back into `dev`,
+then rerun validation before trying again. Do not force-push or create a merge commit during release.
 
 Before stable release, run `/pre-release-audit`, finalize `docs/next`, and let `just release-docs-check` validate the staged docs and website build. `just release` prepares the changelog and release commit, tags it, and pushes the tag. GitHub Actions builds binaries, creates the GitHub release, closes released issues, snapshots and promotes the tagged docs, and updates `website/latest.json`.
 

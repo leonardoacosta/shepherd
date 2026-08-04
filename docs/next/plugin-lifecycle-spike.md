@@ -1,7 +1,7 @@
 # Plugin Lifecycle Spike: `plugin outdated` and the Auto-Update Question
 
 Date: 2026-07-30
-Status: recommendation, pending owner decision
+Status: accepted — manual drift reporting only; no automatic updates
 Scope: design spike for a plugin upgrade / drift path (openspec `spike-plugin-lifecycle`)
 
 ## What shipped in this spike
@@ -89,7 +89,7 @@ versioned release channel, auto-update converts "user chose to run this code" in
 "any future upstream commit runs on this machine", and the marketplace index
 cannot supply the missing review gate.
 
-Concretely, if Option A is accepted:
+The owner accepted Option A. Concretely:
 
 1. Keep `plugin outdated` manual and read-only, exactly as shipped.
 2. Reconsider auto-update only once at least one of these exists: signed or
@@ -105,13 +105,10 @@ Concretely, if Option A is accepted:
    is where the TUI surface (and therefore a server/API-owned drift fact) would be
    designed properly.
 
-### Open questions for the owner
-
-- Should `plugin outdated` be surfaced in the TUI at all, or stay CLI-only?
-- Is an unattended background drift check acceptable at any interval, given it
-  contacts third-party GitHub remotes without the user asking?
-- Is `git` as a hard runtime dependency for this command acceptable? (Install
-  already requires it, so this adds no new dependency.)
+Any TUI surface or unattended background drift check remains undecided and must
+be proposed separately with its server/API ownership, network privacy, and trust
+model. The manual command's `git` dependency is accepted; plugin installation
+already requires it, so this adds no new runtime dependency for plugin users.
 
 ## Follow-ups not in this spike
 
