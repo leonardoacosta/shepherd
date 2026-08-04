@@ -1,7 +1,7 @@
 id = "agy"
-version = "2026.06.24.1"
+version = "2026.08.04.1"
 min_engine_version = 1
-updated_at = "2026-06-24T00:00:00Z"
+updated_at = "2026-08-04T00:00:00Z"
 aliases = ["antigravity", "antigravity-cli"]
 
 [[rules]]
@@ -14,6 +14,29 @@ contains = ["requesting permission for:"]
 any = [
   { contains = ["do you want to proceed?"] },
   { contains = ["tab amend", "edit command"] },
+]
+
+[[rules]]
+id = "login_prompt"
+state = "blocked"
+priority = 290
+region = "whole_recent"
+visible_blocker = true
+any = [
+  { all = [
+    { contains = ["welcome to the antigravity cli. you are currently not signed in."] },
+    { contains = ["select login method:"] },
+    { any = [
+      { contains = ["google oauth"] },
+      { contains = ["use a google cloud project"] },
+    ] },
+  ] },
+  { all = [
+    { contains = ["open the url below in your browser:"] },
+    { contains = ["after authenticating, copy the code displayed in the browser and paste it below:"] },
+    { contains = ["authorization code..."] },
+  ] },
+  { contains = ["got an error: token exchange failed: oauth2:"] },
 ]
 
 [[rules]]

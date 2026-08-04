@@ -1,7 +1,7 @@
 id = "amp"
-version = "2026.07.09.1"
+version = "2026.08.04.1"
 min_engine_version = 2
-updated_at = "2026-07-09T00:00:00Z"
+updated_at = "2026-08-04T00:00:00Z"
 aliases = ["amp-local"]
 
 [[rules]]
@@ -33,7 +33,31 @@ any = [
   { contains = ["allow editing file:"] },
   { contains = ["allow creating file:"] },
   { contains = ["confirm tool call"] },
-  { contains = ["approve"], any = [{ contains = ["allow all for this session"] }, { contains = ["allow all for every session"] }, { contains = ["allow file for every session"] }, { contains = ["deny with feedback"] }] },
+  { contains = ["approve"], any = [
+    { contains = ["allow all for this session"] },
+    { contains = ["allow all for every session"] },
+    { contains = ["allow file for every session"] },
+    { contains = ["deny with feedback"] },
+  ] },
+]
+
+[[rules]]
+id = "login_prompt"
+state = "blocked"
+priority = 250
+region = "whole_recent"
+visible_blocker = true
+any = [
+  { all = [
+    { contains = ["no api key found. starting login flow..."] },
+    { contains = ["would you like to log in to amp?"] },
+  ] },
+  { all = [
+    { contains = ["if your browser does not open automatically, visit:"] },
+    { contains = ["when prompted, paste your code here:"] },
+  ] },
+  { contains = ["no code entered. please paste the code from the browser and try again."] },
+  { contains = ["that code looks incomplete. copy the full code from the browser and try again."] },
 ]
 
 [[rules]]
