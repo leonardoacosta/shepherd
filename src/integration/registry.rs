@@ -226,23 +226,29 @@ pub(crate) fn installed_integration_statuses() -> Vec<super::IntegrationStatus> 
         .collect()
 }
 
+/// Every registered target, including unsupported/unavailable ones. Those
+/// remain visible with an explanation and disabled actions rather than
+/// disappearing, so a Windows-excluded or not-found target still shows a row.
 pub(crate) fn integration_recommendations() -> Vec<super::IntegrationRecommendation> {
     integration_specs()
         .into_iter()
         .filter_map(|(target, path, expected_version)| {
-            if !integration_target_supported(target) {
-                return None;
-            }
             let path = path.ok()?;
+            let supported = integration_target_supported(target);
             let status = integration_status_at(target, path.clone(), expected_version);
+            let available = supported
+                && (integration_target_available(target)
+                    || status.state != super::IntegrationStatusKind::NotInstalled);
             Some(super::IntegrationRecommendation {
                 target,
                 label: integration_target_label(target),
                 command: integration_target_command(target),
-                available: integration_target_available(target)
-                    || status.state != super::IntegrationStatusKind::NotInstalled,
+                supported,
+                available,
                 path,
                 state: status.state,
+                installed_version: status.installed_version,
+                expected_version,
             })
         })
         .collect()

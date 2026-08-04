@@ -302,9 +302,12 @@ mod tests {
         assert!(!app.view.split_borders.is_empty());
         assert!(frame.cursor.is_some());
         assert_eq!(frame.hyperlinks, vec![uri.to_owned()]);
+        // Digest last moved when the sidebar Agent panel header became
+        // `sort: grouped`/`sort: priority` instead of a bare value; geometry
+        // assertions above are unchanged, so only rendered text differs.
         assert_eq!(
             frame_digest(&frame),
-            "ce383feeaac30922502b7c4f8af53b5ca30e816ec4503ca6d015738b584da487"
+            "c34657a8efc1a3c70f85e56c586d2501e7bc2eb625cea2fe3b72458957ca0b56"
         );
     }
 

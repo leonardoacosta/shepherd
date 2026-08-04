@@ -132,6 +132,48 @@ pub(crate) fn scrollbar_offset_from_drag_row(
     scrollbar_offset_from_thumb_top(metrics, track, desired_top)
 }
 
+/// Convert a top-anchored row viewport (offset counted from the first row,
+/// as Settings and other list-style content use) into the bottom-anchored
+/// `ScrollMetrics` shape the pane scrollbar geometry expects, so both kinds
+/// of scrollable content share one thumb/track/drag implementation.
+pub(crate) fn top_anchored_scroll_metrics(
+    total_rows: usize,
+    viewport_rows: usize,
+    offset_from_top: usize,
+) -> crate::pane::ScrollMetrics {
+    let max_offset_from_bottom = total_rows.saturating_sub(viewport_rows);
+    let offset_from_top = offset_from_top.min(max_offset_from_bottom);
+    crate::pane::ScrollMetrics {
+        offset_from_bottom: max_offset_from_bottom.saturating_sub(offset_from_top),
+        max_offset_from_bottom,
+        viewport_rows,
+    }
+}
+
+/// Inverse of [`top_anchored_scroll_metrics`]: recover the top-anchored
+/// offset callers reason about (row index at the top of the viewport).
+pub(crate) fn top_anchored_offset(metrics: crate::pane::ScrollMetrics) -> usize {
+    metrics
+        .max_offset_from_bottom
+        .saturating_sub(metrics.offset_from_bottom)
+}
+
+/// Top-anchored offset a scrollbar-track click at `row` resolves to.
+pub(crate) fn top_anchored_offset_from_row(
+    total_rows: usize,
+    viewport_rows: usize,
+    track: Rect,
+    row: u16,
+) -> usize {
+    let metrics = top_anchored_scroll_metrics(total_rows, viewport_rows, 0);
+    let offset_from_bottom = scrollbar_offset_from_row(metrics, track, row);
+    top_anchored_offset(crate::pane::ScrollMetrics {
+        offset_from_bottom,
+        max_offset_from_bottom: metrics.max_offset_from_bottom,
+        viewport_rows,
+    })
+}
+
 pub(super) fn render_scrollbar(
     frame: &mut Frame,
     metrics: crate::pane::ScrollMetrics,

@@ -1114,6 +1114,16 @@ pub enum AgentPanelSort {
     Priority,
 }
 
+impl AgentPanelSort {
+    /// Shared label so the sidebar header and Settings row can never drift.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Spaces => "grouped",
+            Self::Priority => "priority",
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Settings UI state
 // ---------------------------------------------------------------------------
@@ -1125,6 +1135,7 @@ pub enum SettingsSection {
     Sound,
     Toast,
     Display,
+    Behavior,
     Experiments,
     Integrations,
 }
@@ -1135,6 +1146,7 @@ impl SettingsSection {
         Self::Sound,
         Self::Toast,
         Self::Display,
+        Self::Behavior,
         Self::Integrations,
         Self::Experiments,
     ];
@@ -1145,6 +1157,7 @@ impl SettingsSection {
             Self::Sound => "sound",
             Self::Toast => "toasts",
             Self::Display => "display",
+            Self::Behavior => "behavior",
             Self::Experiments => "experiments",
             Self::Integrations => "integrations",
         }
@@ -1162,6 +1175,10 @@ pub(crate) struct DockPaneCandidate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DisplayRowId {
     AgentBorderLabels,
+    PaneBorders,
+    PaneGaps,
+    HideSingleTabBar,
+    AgentSort,
     TopbarEnabled,
     TopbarRows,
     DockEnabled,
@@ -1181,6 +1198,61 @@ pub(crate) struct DisplayRow {
     pub id: DisplayRowId,
     pub label: String,
     pub selectable: bool,
+}
+
+/// Curated Behavior preferences: close confirmation, naming prompts,
+/// copy-on-select, and mouse scroll speed. Typed row identity mirrors
+/// `DisplayRowId`/`display_rows` per the design's extend-the-pattern
+/// decision rather than an index-based selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BehaviorRowId {
+    ConfirmClose,
+    PromptNewTabName,
+    PromptNewWorkspaceName,
+    CopyOnSelect,
+    ScrollLines,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BehaviorRow {
+    pub id: BehaviorRowId,
+    pub label: String,
+}
+
+/// Lower bound for the mouse scroll speed control; `Config::mouse_scroll_lines`
+/// is backed by `NonZeroUsize` so persisted values are already >= 1.
+pub(crate) const MIN_MOUSE_SCROLL_LINES: usize = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IntegrationOperationKind {
+    Install,
+    Update,
+    Uninstall,
+}
+
+/// One completed target-scoped integration mutation, kept so a late failure
+/// after several successes stays reachable in the scrollable detail view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct IntegrationOperationRecord {
+    pub target: crate::api::schema::IntegrationTarget,
+    pub kind: IntegrationOperationKind,
+    pub success: bool,
+    pub message: String,
+}
+
+/// Transient Integrations-section UI state: which target's action choices
+/// (if any) are open, a pending uninstall awaiting explicit confirmation, a
+/// single-flight guard so only one mutation runs at a time, and the
+/// scrollable operation history.
+#[derive(Debug, Default)]
+pub(crate) struct IntegrationManagerState {
+    pub action_menu_target: Option<crate::api::schema::IntegrationTarget>,
+    pub action_menu_selected: usize,
+    pub pending_uninstall: Option<crate::api::schema::IntegrationTarget>,
+    pub operation_in_flight: bool,
+    pub history: Vec<IntegrationOperationRecord>,
+    pub history_detail_open: bool,
+    pub history_scroll: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1306,6 +1378,8 @@ pub struct SettingsState {
     pub original_theme: Option<String>,
     /// Bounded feedback from the most recent Display action.
     pub display_message: Option<String>,
+    /// Integrations-section target action/confirmation/history state.
+    pub(crate) integration_manager: IntegrationManagerState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1846,6 +1920,29 @@ impl AppState {
                 selectable: true,
             },
             DisplayRow {
+                id: DisplayRowId::PaneBorders,
+                label: format!("pane borders {}", checkbox(self.pane_borders)),
+                selectable: true,
+            },
+            DisplayRow {
+                id: DisplayRowId::PaneGaps,
+                label: format!("pane gaps {}", checkbox(self.pane_gaps)),
+                selectable: true,
+            },
+            DisplayRow {
+                id: DisplayRowId::HideSingleTabBar,
+                label: format!(
+                    "hide tab bar when single tab {}",
+                    checkbox(self.hide_tab_bar_when_single_tab)
+                ),
+                selectable: true,
+            },
+            DisplayRow {
+                id: DisplayRowId::AgentSort,
+                label: format!("agent sort: {}", self.agent_panel_sort.label()),
+                selectable: true,
+            },
+            DisplayRow {
                 id: DisplayRowId::TopbarEnabled,
                 label: format!("topbar {}", checkbox(self.topbar_enabled)),
                 selectable: true,
@@ -1979,6 +2076,81 @@ impl AppState {
     }
 
     pub(crate) fn display_scroll_start(&self, visible_rows: usize) -> usize {
+        if visible_rows == 0 {
+            return 0;
+        }
+        self.settings
+            .list
+            .selected
+            .saturating_add(1)
+            .saturating_sub(visible_rows)
+    }
+
+    pub(crate) fn behavior_rows(&self) -> Vec<BehaviorRow> {
+        let checkbox = |enabled| if enabled { "[✓]" } else { "[ ]" };
+        vec![
+            BehaviorRow {
+                id: BehaviorRowId::ConfirmClose,
+                label: format!(
+                    "confirm before closing a workspace {}",
+                    checkbox(self.confirm_close)
+                ),
+            },
+            BehaviorRow {
+                id: BehaviorRowId::PromptNewTabName,
+                label: format!(
+                    "prompt for new tab name {}",
+                    checkbox(self.prompt_new_tab_name)
+                ),
+            },
+            BehaviorRow {
+                id: BehaviorRowId::PromptNewWorkspaceName,
+                label: format!(
+                    "prompt for new workspace name {}",
+                    checkbox(self.prompt_new_workspace_name)
+                ),
+            },
+            BehaviorRow {
+                id: BehaviorRowId::CopyOnSelect,
+                label: format!("copy on select {}", checkbox(self.copy_on_select)),
+            },
+            BehaviorRow {
+                id: BehaviorRowId::ScrollLines,
+                label: format!("mouse scroll lines: [-] {} [+]", self.mouse_scroll_lines),
+            },
+        ]
+    }
+
+    /// Every Behavior row is selectable, so normalization only needs to clamp
+    /// a preferred/current index into range — no non-selectable rows to skip,
+    /// unlike `normalize_display_selection`.
+    pub(crate) fn normalize_behavior_selection(&mut self, preferred: Option<&BehaviorRowId>) {
+        let rows = self.behavior_rows();
+        if rows.is_empty() {
+            self.settings.list.selected = 0;
+            return;
+        }
+        let selected = preferred
+            .and_then(|preferred| rows.iter().position(|row| &row.id == preferred))
+            .unwrap_or(self.settings.list.selected)
+            .min(rows.len() - 1);
+        self.settings.list.selected = selected;
+    }
+
+    pub(crate) fn move_behavior_selection(&mut self, direction: i8) {
+        let len = self.behavior_rows().len();
+        if len == 0 {
+            return;
+        }
+        let current = self.settings.list.selected.min(len - 1);
+        self.settings.list.selected = if direction < 0 {
+            current.saturating_sub(1)
+        } else {
+            (current + 1).min(len - 1)
+        };
+    }
+
+    pub(crate) fn behavior_scroll_start(&self, visible_rows: usize) -> usize {
         if visible_rows == 0 {
             return 0;
         }
@@ -2434,6 +2606,7 @@ impl AppState {
                 original_palette: None,
                 original_theme: None,
                 display_message: None,
+                integration_manager: IntegrationManagerState::default(),
             },
             integration_recommendations: Vec::new(),
             agent_manifest_summaries: Vec::new(),

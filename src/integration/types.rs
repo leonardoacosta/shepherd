@@ -138,9 +138,34 @@ pub(crate) struct IntegrationRecommendation {
     pub target: crate::api::schema::IntegrationTarget,
     pub label: &'static str,
     pub command: &'static str,
+    /// Whether this target is supported on the current platform at all
+    /// (independent of whether its CLI/plugin is currently found).
+    pub supported: bool,
     pub available: bool,
     pub path: PathBuf,
     pub state: IntegrationStatusKind,
+    pub installed_version: Option<u32>,
+    pub expected_version: u32,
+}
+
+/// One mutating action a Settings row can offer for a target, ordered by
+/// `IntegrationRecommendation::available_actions` to match the row's state:
+/// absent -> Install, outdated -> Update (plus Uninstall), installed -> Uninstall.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IntegrationAction {
+    Install,
+    Update,
+    Uninstall,
+}
+
+impl IntegrationAction {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Install => "install",
+            Self::Update => "update",
+            Self::Uninstall => "uninstall",
+        }
+    }
 }
 
 impl IntegrationRecommendation {
@@ -155,6 +180,36 @@ impl IntegrationRecommendation {
             (_, IntegrationStatusKind::Outdated) => "update available",
             (true, IntegrationStatusKind::NotInstalled) => "available",
             (false, IntegrationStatusKind::NotInstalled) => "not found",
+        }
+    }
+
+    /// Actions offered for this target's current state; empty when the
+    /// target is unsupported or simply not found (see `unavailable_reason`).
+    pub fn available_actions(&self) -> Vec<IntegrationAction> {
+        if !self.supported {
+            return Vec::new();
+        }
+        match self.state {
+            IntegrationStatusKind::NotInstalled if self.available => {
+                vec![IntegrationAction::Install]
+            }
+            IntegrationStatusKind::NotInstalled => Vec::new(),
+            IntegrationStatusKind::Outdated => {
+                vec![IntegrationAction::Update, IntegrationAction::Uninstall]
+            }
+            IntegrationStatusKind::Current => vec![IntegrationAction::Uninstall],
+        }
+    }
+
+    /// Explanation shown when `available_actions()` is empty, so an
+    /// unsupported/unfound target stays visible without a dead-end control.
+    pub fn unavailable_reason(&self) -> Option<&'static str> {
+        if !self.supported {
+            Some("not supported on this platform")
+        } else if !self.available && self.state == IntegrationStatusKind::NotInstalled {
+            Some("not found on PATH")
+        } else {
+            None
         }
     }
 }

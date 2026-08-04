@@ -50,6 +50,26 @@ You can also open the global menu in Shepherd and choose `reload config`.
 
 Reload applies most UI settings without restarting panes. Startup-only settings still need a restart.
 
+## Settings
+
+Open Settings with `prefix` + `s`. Many values on this page can be changed there without editing `config.toml` by hand.
+
+Settings is grouped into Theme, Sound, Toast, Display, Behavior, Integrations, and Experiments. Sections and rows stay reachable on small terminals: the section list adapts to the available width, long content scrolls, and the selected row is kept in view. Keyboard and mouse resolve to the same rows, so anything reachable by keyboard is also clickable.
+
+Changing a control writes that single key back to `config.toml`. Surrounding comments and unrelated keys are preserved. Values apply live where the setting supports it, and any setting that only takes effect on next launch is labeled. If a write fails or the file is malformed, the last valid value stays active.
+
+### Display and Behavior
+
+Display holds visual preferences — pane borders, pane gaps, agent border labels, hiding the tab bar when only one tab is open, and Agent panel sort order — alongside the topbar and dock controls described below. The Agent panel sort control and the sidebar Agent header write the same `ui.agent_panel_sort` value, so the two cannot disagree.
+
+Behavior holds interaction preferences — close confirmation, tab and workspace naming prompts, copy-on-select, and mouse scroll speed.
+
+### Managing integrations
+
+Integrations lists each known target with its support and availability, install path, current version, and expected version. Select a target to install, update, or uninstall it individually; installing all eligible targets remains available as a secondary action. Uninstall names the exact target and path and requires explicit confirmation.
+
+One integration operation runs at a time. Each target keeps its own result with a bounded summary and scrollable detail, so a failure after several successes stays visible and reachable on a small terminal.
+
 ## Terminal defaults
 
 Set the executable Shepherd uses for newly created interactive panes:

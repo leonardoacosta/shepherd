@@ -53,9 +53,15 @@ use self::release_notes::{render_product_announcement_overlay, render_release_no
 pub(crate) use self::scrollbar::{
     pane_scrollbar_rect, release_notes_scrollbar_rect, scrollbar_offset_from_drag_row,
     scrollbar_offset_from_row, scrollbar_thumb_grab_offset, should_show_scrollbar,
+    top_anchored_offset_from_row,
 };
-pub(crate) use self::settings::display_size_delta_at;
 use self::settings::render_settings_overlay;
+#[cfg(test)]
+pub(crate) use self::settings::SettingsNav;
+pub(crate) use self::settings::{
+    behavior_scroll_lines_delta_at, compute_settings_view, display_size_delta_at,
+    settings_row_absolute_index, settings_row_count, SettingsRowId, SettingsView,
+};
 #[cfg(test)]
 pub(crate) use self::sidebar::workspace_drop_indicator_row;
 use self::sidebar::{render_sidebar, render_sidebar_collapsed};
@@ -77,8 +83,8 @@ pub(crate) use self::{
         remove_worktree_popup_rect, rename_button_rects,
     },
     settings::{
-        settings_button_rects, settings_popup_height, settings_show_primary_action,
-        SETTINGS_POPUP_WIDTH,
+        integration_dialog_choice_rects, settings_button_rects, settings_popup_height,
+        settings_show_primary_action, SETTINGS_POPUP_WIDTH,
     },
     sidebar::{
         agent_entry_gap, agent_entry_height_in_body, agent_panel_body_rect, agent_panel_entries,

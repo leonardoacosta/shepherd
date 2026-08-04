@@ -81,15 +81,16 @@ pub(crate) fn sidebar_section_divider_rect(area: Rect, split_ratio: f32) -> Rect
     Rect::new(content.x, content.y + ws_h, content.width, 1)
 }
 
-fn agent_panel_sort_label(sort: AgentPanelSort) -> &'static str {
-    match sort {
-        AgentPanelSort::Spaces => "grouped",
-        AgentPanelSort::Priority => "priority",
-    }
+/// `sort: grouped`/`sort: priority`, so the header identifies itself as a
+/// sort control instead of a bare value. Shares `AgentPanelSort::label()`
+/// with the Settings Display row (`AgentSort`) so both surfaces can never
+/// drift on wording.
+fn agent_panel_sort_label(sort: AgentPanelSort) -> String {
+    format!("sort: {}", sort.label())
 }
 
 pub(crate) fn agent_panel_toggle_rect(area: Rect, sort: AgentPanelSort) -> Rect {
-    agent_panel_header_label_rect(area, agent_panel_sort_label(sort))
+    agent_panel_header_label_rect(area, &agent_panel_sort_label(sort))
 }
 
 fn agent_panel_header_label_rect(area: Rect, label: &str) -> Rect {
@@ -1527,8 +1528,9 @@ fn render_agent_detail(
         Rect::new(area.x, area.y + 1, area.width, 1),
     );
     let control_label = active_agent_view_label(app)
+        .map(str::to_string)
         .unwrap_or_else(|| agent_panel_sort_label(app.agent_panel_sort));
-    let toggle_rect = agent_panel_header_label_rect(area, control_label);
+    let toggle_rect = agent_panel_header_label_rect(area, &control_label);
     if toggle_rect != Rect::default() {
         let color = if app.agent_view_override.is_some() {
             p.accent
@@ -2976,5 +2978,40 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                 },
             ]
         );
+    }
+
+    // -----------------------------------------------------------------
+    // Agent panel sort header clarity (task 4.3)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn agent_panel_header_labels_itself_as_a_sort_control() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.active = Some(0);
+        let terminal_runtimes = TerminalRuntimeRegistry::default();
+
+        for sort in [AgentPanelSort::Spaces, AgentPanelSort::Priority] {
+            app.agent_panel_sort = sort;
+            let mut terminal =
+                Terminal::new(TestBackend::new(30, 24)).expect("test terminal should initialize");
+            terminal
+                .draw(|frame| {
+                    render_agent_detail(&app, &terminal_runtimes, frame, Rect::new(0, 0, 30, 24))
+                })
+                .expect("agent detail should render");
+            let rendered = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            let expected = format!("sort: {}", sort.label());
+            assert!(
+                rendered.contains(&expected),
+                "expected header to contain {expected:?}, got: {rendered}"
+            );
+        }
     }
 }

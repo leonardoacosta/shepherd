@@ -681,6 +681,7 @@ impl App {
                 original_palette: None,
                 original_theme: None,
                 display_message: None,
+                integration_manager: state::IntegrationManagerState::default(),
             },
             integration_recommendations: crate::integration::integration_recommendations(),
             agent_manifest_summaries,

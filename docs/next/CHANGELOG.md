@@ -5,12 +5,17 @@
 ### Added
 - Connections to the Shepherd socket from a process running as a different user are now rejected on Linux and macOS.
 - Added Display settings and disabled-by-default config for a token-driven desktop topbar and an interactive workspace plugin dock, including explicit eligible-pane launch, auxiliary input focus, restore-safe hidden backing tabs, and compatible Unix live-handoff preservation.
+- Settings now manages integration targets individually, showing support and availability, install path, current version, and expected version per target, with install, update, and confirmed uninstall actions, a single in-flight operation, and per-target results kept reachable as a bounded summary with scrollable detail.
+- Added Display and Behavior settings rows for pane borders, pane gaps, agent border labels, single-tab tab-bar visibility, Agent panel sort, close confirmation, tab and workspace naming prompts, copy-on-select, and mouse scroll speed. Each control writes one key back to `config.toml`, preserving comments and unrelated keys, and applies live where supported.
 
 ### Changed
+- Settings sections and rows now stay reachable at small terminal sizes. The section list adapts to the available width, content scrolls with the selected row kept in view, and keyboard and mouse resolve to identical row geometry.
+- The sidebar Agent header now reads `sort: grouped` or `sort: priority` and shares the same `ui.agent_panel_sort` value as the Settings control, so the two inputs cannot diverge.
 - Agent status indicators now use the same static workspace marks across the sidebar, navigator, and mobile views, eliminating continuous spinner rendering while agents work.
 - Relicensed Shepherd from AGPL-3.0-or-later to Apache-2.0.
 
 ### Fixed
+- Onboarding now derives its prefix, help, and Settings shortcuts from the effective keybindings instead of hardcoding them, and lists help and Settings separately. The previous text advertised a single `?` for both and was incorrect even under default configuration.
 - Agent prompts now wait briefly after sending text before pressing Enter, preventing prompts from remaining in agent composers without starting a turn. (#1878)
 - Empty clipboard writes from pane applications no longer erase existing clipboard contents or show a copied confirmation. (#1893)
 - Plain mouse movement no longer triggers continuous full renders while preserving Shepherd menu hover and pane application mouse tracking. (#1865)

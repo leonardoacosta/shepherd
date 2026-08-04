@@ -453,16 +453,23 @@ fn integration_recommendations_mark_standalone_codex_available() {
     let _ = fs::remove_dir_all(base);
 }
 
-#[test]
-fn integration_recommendation_installs_available_or_outdated_targets() {
-    let mut recommendation = IntegrationRecommendation {
+fn test_recommendation() -> IntegrationRecommendation {
+    IntegrationRecommendation {
         target: crate::api::schema::IntegrationTarget::Claude,
         label: "claude",
         command: "claude",
+        supported: true,
         available: false,
         path: PathBuf::from("/tmp/shepherd-agent-state.sh"),
         state: IntegrationStatusKind::NotInstalled,
-    };
+        installed_version: None,
+        expected_version: 1,
+    }
+}
+
+#[test]
+fn integration_recommendation_installs_available_or_outdated_targets() {
+    let mut recommendation = test_recommendation();
     assert!(!recommendation.needs_install());
 
     recommendation.available = true;
@@ -475,6 +482,91 @@ fn integration_recommendation_installs_available_or_outdated_targets() {
     recommendation.available = true;
     recommendation.state = IntegrationStatusKind::Current;
     assert!(!recommendation.needs_install());
+}
+
+#[test]
+fn integration_recommendation_available_actions_match_target_state() {
+    let mut recommendation = test_recommendation();
+    assert_eq!(recommendation.available_actions(), Vec::new());
+    assert_eq!(
+        recommendation.unavailable_reason(),
+        Some("not found on PATH")
+    );
+
+    recommendation.available = true;
+    assert_eq!(
+        recommendation.available_actions(),
+        vec![IntegrationAction::Install]
+    );
+    assert_eq!(recommendation.unavailable_reason(), None);
+
+    recommendation.state = IntegrationStatusKind::Outdated;
+    assert_eq!(
+        recommendation.available_actions(),
+        vec![IntegrationAction::Update, IntegrationAction::Uninstall]
+    );
+    assert_eq!(recommendation.unavailable_reason(), None);
+
+    recommendation.state = IntegrationStatusKind::Current;
+    assert_eq!(
+        recommendation.available_actions(),
+        vec![IntegrationAction::Uninstall]
+    );
+    assert_eq!(recommendation.unavailable_reason(), None);
+}
+
+#[test]
+fn integration_recommendation_unsupported_target_has_no_actions_but_a_reason() {
+    let mut recommendation = test_recommendation();
+    recommendation.supported = false;
+    recommendation.state = IntegrationStatusKind::Current;
+    recommendation.available = true;
+
+    assert_eq!(recommendation.available_actions(), Vec::new());
+    assert_eq!(
+        recommendation.unavailable_reason(),
+        Some("not supported on this platform")
+    );
+}
+
+#[test]
+fn integration_recommendations_include_richer_version_and_support_data() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let home = base.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let original_home = std::env::var_os("HOME");
+    let original_path = std::env::var_os("PATH");
+    std::env::set_var("HOME", &home);
+    std::env::set_var("PATH", "");
+
+    let recommendations = integration_recommendations();
+    assert_eq!(
+        recommendations.len(),
+        crate::api::schema::IntegrationTarget::ALL.len()
+    );
+
+    let claude = recommendations
+        .iter()
+        .find(|item| item.target == crate::api::schema::IntegrationTarget::Claude)
+        .expect("claude recommendation should be present");
+    // Not installed under the isolated HOME: expected_version is still the
+    // registered target constant, and installed_version is absent.
+    assert!(claude.expected_version > 0);
+    assert_eq!(claude.installed_version, None);
+    assert!(claude.supported);
+
+    if let Some(home) = original_home {
+        std::env::set_var("HOME", home);
+    } else {
+        std::env::remove_var("HOME");
+    }
+    if let Some(path) = original_path {
+        std::env::set_var("PATH", path);
+    } else {
+        std::env::remove_var("PATH");
+    }
+    let _ = std::fs::remove_dir_all(base);
 }
 
 #[test]
