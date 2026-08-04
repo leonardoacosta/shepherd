@@ -16,4 +16,5 @@
 ## 4. Verify and hand off
 
 - [ ] 4.1 Compare `src/protocol/wire.rs::PROTOCOL_VERSION` with the latest release, update fixtures only if required, then run `just check` and expect all repository checks to pass.
+  - note: protocol comparison already performed 2026-08-04 — latest release tag `v0.7.5` carries `PROTOCOL_VERSION = 17`, current source is `19`. Source is already ahead of the released protocol, so per CLAUDE.md's release-relative rule **do not bump**; touch wire fixtures only if the contract genuinely forces it. `just check` still outstanding as the wave gate.
 - [ ] 4.2 Run `openspec validate expose-agent-state-source --strict --no-interactive && git diff --check`; expect both commands to exit 0.

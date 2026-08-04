@@ -52,6 +52,41 @@ Settings may count current reporters and session identities by exact registered 
 3. Add descriptive integration aggregation and next docs.
 4. Roll back by removing optional fields and client consumers; no persisted data migration is required.
 
+## Implementation survey (verified 2026-08-04, against `dev` at 99166485)
+
+Source-of-truth locations confirmed by reading current source, so the implementation does not
+re-derive them or duplicate existing arbitration:
+
+- Arbitration already exists in `TerminalState` (`src/terminal/state.rs`). The projection reads it;
+  it does not add rules.
+  - `hook_authority_is_effective` (~1695) — a full-lifecycle authority counts only when its parsed
+    agent equals `detected_agent` and there is no `recent_agent_process_exit`. A non-full-lifecycle
+    (mixed) authority is unconditionally "effective" at this layer.
+  - `live_full_lifecycle_hook_authority` (~1754) — effective AND full-lifecycle. Public alias:
+    `full_lifecycle_hook_authority_active` (~1737).
+  - `visible_blocker_overrides_hook` (~1741) — only reachable when NOT full-lifecycle. This is
+    exactly the spec's "mixed report overridden by screen evidence" case: effective becomes
+    `screen` while the mixed reporter observation is retained.
+  - `HookAuthority` (~18) already carries `source`, `agent_label`, `state`, `reported_at`, and
+    `session_ref` — the reporter fields need no new plumbing, and `session_ref` is what must stay
+    separate from reporter observation.
+- Classification helpers to REUSE, not reinvent: `full_lifecycle_hook_authority(source, agent_label)`
+  and `session_identity_only_integration(source, agent_label)` (`src/detect/mod.rs` ~283 / ~295).
+  The full-lifecycle set is a fixed match list; `hermes` is the session-identity-only case.
+- Compatibility: `screen_detection_skipped` is currently derived at `src/app/agents.rs:381` from
+  `full_lifecycle_hook_authority_active()`. Deriving it from "effective is reported with
+  exclusive_lifecycle authority" is therefore equivalent by construction — no behavior change, and
+  no parallel bool should survive.
+- `src/api/schema/agents.rs:200` declares `screen_detection_skipped` on `AgentInfo`; `PaneInfo`
+  (`src/api/schema/panes.rs`) has no equivalent today, so the shared projection is what first puts
+  the two models on one contract.
+- NOT a defect: `src/app/api/agents.rs:188` hard-codes `"screen_detection_skipped": true`, but the
+  enclosing block at line 174 is already guarded by `full_lifecycle_hook_authority_active()`, so the
+  literal is correct in context. Do not "fix" it.
+
+Protocol: latest release tag `v0.7.5` carries `PROTOCOL_VERSION = 17`; current source is `19`.
+Source is already ahead, so task 4.1 must NOT bump it.
+
 ## Open Questions
 
 None. Exact Rust type names may follow existing schema conventions, but the two-dimensional effective/reporter semantics are fixed.
