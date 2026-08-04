@@ -56,7 +56,7 @@ Open Settings with `prefix` + `s`. Many values on this page can be changed there
 
 Settings is grouped into Theme, Sound, Toast, Display, Behavior, Integrations, and Experiments. Sections and rows stay reachable on small terminals: the section list adapts to the available width, long content scrolls, and the selected row is kept in view. Keyboard and mouse resolve to the same rows, so anything reachable by keyboard is also clickable.
 
-Changing a control writes that single key back to `config.toml`. Surrounding comments and unrelated keys are preserved. Values apply live where the setting supports it, and any setting that only takes effect on next launch is labeled. If a write fails or the file is malformed, the last valid value stays active.
+Changing a control writes that single key back to `config.toml`. Surrounding comments and unrelated keys are preserved. Every control in these sections applies immediately; none of them need a restart. If a write fails or the file is malformed, the last valid value stays active.
 
 ### Display and Behavior
 
@@ -66,9 +66,11 @@ Behavior holds interaction preferences — close confirmation, tab and workspace
 
 ### Managing integrations
 
-Integrations lists each known target with its support and availability, install path, current version, and expected version. Select a target to install, update, or uninstall it individually; installing all eligible targets remains available as a secondary action. Uninstall names the exact target and path and requires explicit confirmation.
+Integrations lists each known target with its current status: `installed`, `update available`, `available`, or `not found`. A target that is unsupported on your platform or missing from `PATH` stays in the list with the reason instead of disappearing, and offers no action.
 
-One integration operation runs at a time. Each target keeps its own result with a bounded summary and scrollable detail, so a failure after several successes stays visible and reachable on a small terminal.
+Select a target and press Enter to open its actions — install, update, or uninstall, depending on its state. Uninstall always asks for confirmation and names the exact target and its install path first; cancelling changes nothing. Installing all eligible targets remains available as a secondary footer action.
+
+One integration operation runs at a time; a second attempt while one is running is refused. Each target keeps its own result as a short summary, and `d` opens the full scrollable operation history, so a failure after several successes stays visible and reachable on a small terminal.
 
 ## Terminal defaults
 

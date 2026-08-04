@@ -5,8 +5,8 @@
 ### Added
 - Connections to the Shepherd socket from a process running as a different user are now rejected on Linux and macOS.
 - Added Display settings and disabled-by-default config for a token-driven desktop topbar and an interactive workspace plugin dock, including explicit eligible-pane launch, auxiliary input focus, restore-safe hidden backing tabs, and compatible Unix live-handoff preservation.
-- Settings now manages integration targets individually, showing support and availability, install path, current version, and expected version per target, with install, update, and confirmed uninstall actions, a single in-flight operation, and per-target results kept reachable as a bounded summary with scrollable detail.
-- Added Display and Behavior settings rows for pane borders, pane gaps, agent border labels, single-tab tab-bar visibility, Agent panel sort, close confirmation, tab and workspace naming prompts, copy-on-select, and mouse scroll speed. Each control writes one key back to `config.toml`, preserving comments and unrelated keys, and applies live where supported.
+- Settings now manages integration targets individually, with per-target install, update, and confirmed uninstall actions, a single in-flight operation, and per-target results reachable as a short summary plus a scrollable operation history. Unsupported or not-found targets stay listed with their reason instead of disappearing, and uninstall names the exact target and install path before confirming.
+- Added Display and Behavior settings rows for pane borders, pane gaps, agent border labels, single-tab tab-bar visibility, Agent panel sort, close confirmation, tab and workspace naming prompts, copy-on-select, and mouse scroll speed. Each control writes one key back to `config.toml`, preserving comments and unrelated keys, and applies immediately.
 
 ### Changed
 - Settings sections and rows now stay reachable at small terminal sizes. The section list adapts to the available width, content scrolls with the selected row kept in view, and keyboard and mouse resolve to identical row geometry.
