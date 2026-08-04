@@ -953,8 +953,10 @@ mod tests {
         line
     }
 
-    fn local_stream_pair(name: &str) -> (LocalStream, LocalStream, PathBuf) {
-        let path = unique_test_path(name);
+    fn local_stream_pair() -> (LocalStream, LocalStream, PathBuf) {
+        // macOS Unix socket paths have a smaller limit than Linux, so keep the
+        // already unique test filename compact.
+        let path = unique_test_path("api");
         let listener = crate::ipc::bind_local_listener(&path).unwrap();
         let client = crate::ipc::connect_local_stream(&path).unwrap();
         let server = listener.accept().unwrap();
@@ -1166,7 +1168,7 @@ mod tests {
 
     #[test]
     fn too_many_connections_response_uses_expected_error_code() {
-        let (mut client, mut server, _path) = local_stream_pair("too-many-connections");
+        let (mut client, mut server, _path) = local_stream_pair();
         write_too_many_connections_error(&mut server, 7).unwrap();
 
         let response: serde_json::Value = serde_json::from_str(&read_line(&mut client)).unwrap();
@@ -1182,7 +1184,7 @@ mod tests {
         // Real uid-switching isn't available in CI, so the mismatch is simulated through the
         // injected `authorize_peer` seam rather than an actual different-uid caller (real
         // syscall path covered by `ipc::tests::peer_cred_authorizes_same_process_connection`).
-        let (mut client, server, _path) = local_stream_pair("peer-cred-mismatch");
+        let (mut client, server, _path) = local_stream_pair();
         let (api_tx, mut api_rx) = mpsc::unbounded_channel::<ApiRequestMessage>();
         let active_connections = AtomicUsize::new(0);
         let running = Arc::new(AtomicBool::new(true));
@@ -1208,7 +1210,7 @@ mod tests {
 
     #[test]
     fn peer_cred_check_error_rejects_connection_before_dispatch() {
-        let (mut client, server, _path) = local_stream_pair("peer-cred-check-error");
+        let (mut client, server, _path) = local_stream_pair();
         let (api_tx, mut api_rx) = mpsc::unbounded_channel::<ApiRequestMessage>();
         let active_connections = AtomicUsize::new(0);
         let running = Arc::new(AtomicBool::new(true));
@@ -1235,7 +1237,7 @@ mod tests {
     #[test]
     fn dispatched_request_reports_response_write_completion() {
         let (api_tx, mut api_rx) = mpsc::unbounded_channel();
-        let (mut client, server, _path) = local_stream_pair("write-ack");
+        let (mut client, server, _path) = local_stream_pair();
         client
             .write_all(br#"{"id":"req_write","method":"workspace.list","params":{}}"#)
             .unwrap();
@@ -1276,7 +1278,7 @@ mod tests {
         let (api_tx, responder) =
             spawn_pane_get_responder(crate::api::schema::AgentStatus::Blocked);
 
-        let (mut client, server, _path) = local_stream_pair("api-events-wait-initial");
+        let (mut client, server, _path) = local_stream_pair();
         client
             .write_all(br#"{"id":"wait_1","method":"events.wait","params":{"match_event":{"event":"pane_agent_status_changed","pane_id":"pane_1","agent_status":"blocked"},"timeout_ms":1000}}"#)
             .unwrap();
@@ -1303,7 +1305,7 @@ mod tests {
         let (api_tx, responder) =
             spawn_pane_get_responder(crate::api::schema::AgentStatus::Unknown);
 
-        let (mut client, server, _path) = local_stream_pair("api-events-wait-timeout");
+        let (mut client, server, _path) = local_stream_pair();
         client
             .write_all(br#"{"id":"wait_2","method":"events.wait","params":{"match_event":{"event":"pane_agent_status_changed","pane_id":"pane_1","agent_status":"blocked"},"timeout_ms":30}}"#)
             .unwrap();
@@ -1365,7 +1367,7 @@ mod tests {
             }
         });
 
-        let (mut client, server, _path) = local_stream_pair("wait-close");
+        let (mut client, server, _path) = local_stream_pair();
         client
             .write_all(br#"{"id":"wait_close","method":"events.wait","params":{"match_event":{"event":"pane_agent_status_changed","pane_id":"pane_1","agent_status":"done"},"timeout_ms":500}}"#)
             .unwrap();
@@ -1418,7 +1420,7 @@ mod tests {
             }
         });
 
-        let (mut client, server, _path) = local_stream_pair("api-wait-disconnect");
+        let (mut client, server, _path) = local_stream_pair();
         client
             .write_all(br#"{"id":"req_wait","method":"pane.wait_for_output","params":{"pane_id":"pane_1","source":"recent","match":{"type":"substring","value":"never"}}}"#)
             .unwrap();
@@ -1448,7 +1450,7 @@ mod tests {
     #[test]
     fn subscriptions_stop_when_client_disconnects() {
         let (api_tx, _api_rx) = mpsc::unbounded_channel::<ApiRequestMessage>();
-        let (mut client, server, _path) = local_stream_pair("api-sub-disconnect");
+        let (mut client, server, _path) = local_stream_pair();
         client
             .write_all(
                 br#"{"id":"sub_1","method":"events.subscribe","params":{"subscriptions":[{"type":"workspace.created"}]}}"#,
@@ -1480,7 +1482,7 @@ mod tests {
     #[test]
     fn subscriptions_stop_when_server_shuts_down() {
         let (api_tx, _api_rx) = mpsc::unbounded_channel::<ApiRequestMessage>();
-        let (mut client, server, _path) = local_stream_pair("api-sub-shutdown");
+        let (mut client, server, _path) = local_stream_pair();
         client
             .write_all(
                 br#"{"id":"sub_2","method":"events.subscribe","params":{"subscriptions":[{"type":"workspace.created"}]}}"#,
@@ -1544,7 +1546,7 @@ mod tests {
             }
         });
 
-        let (mut client, server, _path) = local_stream_pair("api-pane-output");
+        let (mut client, server, _path) = local_stream_pair();
         client
             .write_all(
                 br#"{"id":"sub_output","method":"events.subscribe","params":{"subscriptions":[{"type":"pane.output","pane_id":"pane_1","source":"recent","format":"text","initial_tail_lines":40}]}}"#,
