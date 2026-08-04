@@ -23,7 +23,10 @@ fn help_entry(key: impl Into<String>, label: &'static str) -> HelpEntry {
     (key.into(), Cow::Borrowed(label))
 }
 
-fn keybind_label(bindings: &crate::config::ActionKeybinds) -> String {
+/// Human-readable label for a configured action, falling back to `unset` when the
+/// action has no binding. Shared with onboarding so its shortcut copy always matches
+/// this help surface instead of drifting into its own formatting.
+pub(super) fn keybind_label(bindings: &crate::config::ActionKeybinds) -> String {
     bindings.label().unwrap_or_else(|| "unset".to_string())
 }
 
@@ -416,5 +419,31 @@ mod tests {
         assert_eq!(filtered[0].1[0].1, "close pane");
 
         assert!(filter_keybind_help_groups(groups(), "panes").is_empty());
+    }
+
+    // Characterizes `keybind_label` before it becomes a shared helper (onboarding will
+    // call it too) so extraction cannot silently change these formatted values.
+    #[test]
+    fn keybind_label_formats_a_single_configured_binding() {
+        let bindings = crate::config::ActionKeybinds::prefix("?");
+
+        assert_eq!(keybind_label(&bindings), "prefix+?");
+    }
+
+    #[test]
+    fn keybind_label_reports_unset_for_empty_bindings() {
+        let bindings = crate::config::ActionKeybinds::default();
+
+        assert_eq!(keybind_label(&bindings), "unset");
+    }
+
+    #[test]
+    fn keybind_label_joins_multiple_configured_alternatives() {
+        let mut bindings = crate::config::ActionKeybinds::prefix("a");
+        bindings
+            .bindings
+            .extend(crate::config::ActionKeybinds::prefix("b").bindings);
+
+        assert_eq!(keybind_label(&bindings), "prefix+a / prefix+b");
     }
 }

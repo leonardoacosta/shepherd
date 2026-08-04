@@ -51,6 +51,21 @@ Rejected: editing the runtime to agree with the old docs or copying changes into
 3. Correct next-version Hermes docs and strengthen narrow parity checks.
 4. Run focused and repository-wide verification. Rollback is a source/docs revert; no stored state or wire data migrates.
 
+## Reconfirmation (task 1.2)
+
+Re-checked at implementation time against current source, not just this document:
+
+- `src/detect/mod.rs::full_lifecycle_hook_authority("shepherd:hermes", "hermes")` returns
+  `false`; `session_identity_only_integration("shepherd:hermes", "hermes")` returns `true`;
+  `Agent::SCREEN_MANIFEST_AGENTS` contains `Agent::Hermes`. Covered by
+  `hermes_session_integration_leaves_state_to_screen_detection` in `src/detect/mod.rs`.
+- `src/integration/mod.rs::HERMES_INTEGRATION_VERSION` is `4`, asserted against the bundled
+  asset by `bundled_integration_asset_versions_match_expected_versions` in
+  `src/integration/tests.rs`.
+- No source drift found: the runtime contract (session identity only, state from screen
+  manifest, version `4`) matches this design document. `just test-one hermes` passes
+  (12/12) and confirms this at runtime rather than by source reading alone.
+
 ## Open Questions
 
 None.
