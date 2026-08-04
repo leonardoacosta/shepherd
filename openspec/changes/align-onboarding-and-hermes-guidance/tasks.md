@@ -30,7 +30,7 @@
   - touches: none (read-only validation)
   - depends on: 2.2, 3.1
 
-- [ ] 4.2 Run `openspec validate align-onboarding-and-hermes-guidance --strict --no-interactive && git diff --check && git diff --exit-code -- src/detect src/integration website/src/content/docs`; expected result: validation and whitespace checks exit 0 and no runtime, integration-asset, or stable-doc diff exists.
+- [x] 4.2 Run `openspec validate align-onboarding-and-hermes-guidance --strict --no-interactive && git diff --check && git diff --exit-code -- src/detect src/integration website/src/content/docs`; expected result: validation and whitespace checks exit 0 and no runtime, integration-asset, or stable-doc diff exists.
   - touches: none (read-only validation)
   - depends on: 4.1
 
