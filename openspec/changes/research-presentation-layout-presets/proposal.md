@@ -27,6 +27,7 @@ None.
 - Product/runtime: test-only source characterization is allowed, but no runtime branch, config, API, protocol, documentation, or persisted-state behavior changes.
 - Follow-on: an implementation feature may be authored only after the terminal evidence gate approves exact presets and replacement semantics.
 - Feature dependency: `surface-settings-and-integration-controls` MUST be applied and archived before this research begins so candidate placement reflects the final responsive Settings information architecture.
+- depends on: `surface-settings-and-integration-controls`
 - Issue linkage: not applicable because this repository has no `.beads` store and the user requested a fork-local feature queue from recorded research.
 - Base and baseline:
   - base-commit: shepherd@062955ae513d4b0e3281e957043b190bdfd90ee6

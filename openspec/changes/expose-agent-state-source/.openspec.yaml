@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-08-04
+goal: Make runtime state provenance visible without presenting installation or
+  report age as health.
