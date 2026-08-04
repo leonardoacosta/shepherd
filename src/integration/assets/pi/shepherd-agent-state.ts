@@ -27,21 +27,37 @@ function sendRequestAttempt(request: unknown, timeoutMs: number): Promise<boolea
   return new Promise((resolve) => {
     let done = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let socket: net.Socket | undefined;
     const finish = (delivered: boolean) => {
       if (done) return;
       done = true;
       if (timeout) {
         clearTimeout(timeout);
       }
-      socket.destroy();
+      try {
+        socket?.destroy();
+      } catch {
+        // Shepherd delivery is optional and must not interrupt Pi.
+      }
       resolve(delivered);
     };
 
-    const socket = net.createConnection(socketEndpoint!);
-    socket.on("error", () => finish(false));
-    socket.on("connect", () => socket.write(`${JSON.stringify(request)}\n`));
-    socket.on("data", () => finish(true));
-    socket.on("end", () => finish(false));
+    try {
+      socket = net.createConnection(socketEndpoint!);
+      socket.on("error", () => finish(false));
+      socket.on("connect", () => {
+        try {
+          socket?.write(`${JSON.stringify(request)}\n`);
+        } catch {
+          finish(false);
+        }
+      });
+      socket.on("data", () => finish(true));
+      socket.on("end", () => finish(false));
+    } catch {
+      finish(false);
+      return;
+    }
     timeout = setTimeout(() => finish(false), timeoutMs);
     timeout.unref?.();
   });
@@ -60,6 +76,7 @@ type QueuedState = {
   state: AgentState;
   message?: string;
   seq: number;
+  projection: "ordinary" | "attention";
 };
 
 type WorkflowLifecycleSnapshot = {
@@ -149,25 +166,35 @@ function reportSession(sessionStartSource?: string): Promise<void> {
 }
 
 function sendState(state: AgentState, message?: string, seq = nextReportSeq()): Promise<void> {
+  const params = {
+    pane_id: paneId,
+    source,
+    agent: "pi",
+    state,
+    ...(message === undefined ? {} : { message }),
+    seq,
+  };
   return sendRequest({
     id: `${source}:${Date.now()}:${Math.random().toString(36).slice(2)}`,
     method: "pane.report_agent",
-    params: withSessionRef({
-      pane_id: paneId,
-      source,
-      agent: "pi",
-      state,
-      message,
-      seq,
-    }),
+    params: withSessionRef(params),
   });
 }
 
 let sendInFlight = false;
-let queuedState: QueuedState | undefined;
+let queuedStates: QueuedState[] = [];
 
-function queueState(state: AgentState, message?: string): void {
-  queuedState = { state, message, seq: nextReportSeq() };
+function queueState(
+  state: AgentState,
+  message?: string,
+  projection: QueuedState["projection"] = "ordinary",
+): void {
+  const next = { state, message, seq: nextReportSeq(), projection };
+  if (projection === "ordinary" && queuedStates.at(-1)?.projection === "ordinary") {
+    queuedStates[queuedStates.length - 1] = next;
+  } else {
+    queuedStates.push(next);
+  }
   if (!sendInFlight) {
     void drainStateQueue();
   }
@@ -180,17 +207,52 @@ async function drainStateQueue(): Promise<void> {
 
   sendInFlight = true;
   try {
-    while (queuedState) {
-      const next = queuedState;
-      queuedState = undefined;
-      await sendState(next.state, next.message, next.seq);
+    while (queuedStates.length > 0) {
+      const next = queuedStates.shift()!;
+      if (next.projection === "attention") {
+        const params = {
+          pane_id: paneId,
+          source,
+          agent: "pi",
+          state: next.state,
+          ...(next.message === undefined ? {} : { message: next.message }),
+          seq: next.seq,
+        };
+        await sendRequest({
+          id: `${source}:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+          method: "pane.report_agent",
+          params,
+        });
+      } else {
+        await sendState(next.state, next.message, next.seq);
+      }
     }
   } finally {
     sendInFlight = false;
-    if (queuedState) {
+    if (queuedStates.length > 0) {
       void drainStateQueue();
     }
   }
+}
+
+function normalizeAttentionLabel(value: unknown): string {
+  const input = typeof value === "string" ? value : "";
+  const normalized =
+    input
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+      .replace(/\s+/gu, " ")
+      .trim() || "waiting for user input";
+  let bounded = "";
+  let byteLength = 0;
+  for (const character of normalized) {
+    const characterBytes = Buffer.byteLength(character, "utf8");
+    if (byteLength + characterBytes > 256) {
+      break;
+    }
+    bounded += character;
+    byteLength += characterBytes;
+  }
+  return bounded;
 }
 
 export default function (pi) {
@@ -317,14 +379,17 @@ export default function (pi) {
     return { state: "idle" as const, message: undefined };
   }
 
-  function publishState(force = false) {
+  function publishState(
+    force = false,
+    projection: QueuedState["projection"] = "ordinary",
+  ) {
     const next = desiredState();
     if (!force && next.state === lastState && next.message === lastMessage) {
       return;
     }
     lastState = next.state;
     lastMessage = next.message;
-    queueState(next.state, next.message);
+    queueState(next.state, next.message, projection);
   }
 
   pi.events.on("shepherd:blocked", (data) => {
@@ -336,23 +401,30 @@ export default function (pi) {
       if (blockedCount === 0) {
         blockedMessage = undefined;
         if (workflowBinding) {
-          refreshWorkflowSnapshot(workflowBinding, true);
+          refreshWorkflowSnapshot(workflowBinding, false);
+          publishState(false, "attention");
           return;
         }
       }
-      publishState();
+      publishState(false, "attention");
       return;
     }
 
     blockedCount += 1;
-    blockedMessage = data.label;
-    publishState();
+    blockedMessage = normalizeAttentionLabel(data.label);
+    publishState(false, "attention");
   });
 
   pi.on("session_start", async (event, ctx) => {
     if (ctx?.hasUI !== true) {
       return;
     }
+    disposeWorkflowBinding();
+    blockedCount = 0;
+    blockedMessage = undefined;
+    lastState = undefined;
+    lastMessage = undefined;
+    queuedStates = [];
     rootSession = true;
     updateSessionRef(ctx);
     await reportSession(event?.reason);
@@ -386,6 +458,12 @@ export default function (pi) {
       return;
     }
     rootSession = false;
+    agentActive = false;
+    blockedCount = 0;
+    blockedMessage = undefined;
+    lastState = undefined;
+    lastMessage = undefined;
+    queuedStates = [];
     disposeWorkflowBinding();
   });
 }

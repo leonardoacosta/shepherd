@@ -285,6 +285,117 @@ test("Pi settlement preserves explicit blocked-state precedence", async () => {
   expect(requestStates(requests)).toEqual(["idle", "working", "blocked", "idle"]);
 });
 
+test("Pi attention transitions use an identity-free bounded projection", async () => {
+  const requests = await startRecordingServer("pi-attention-private");
+  const { eventHandlers, handlers, pi } = createExtensionHarness();
+  const { default: install } = await importFresh("./pi/shepherd-agent-state.ts");
+  install(pi);
+
+  let idle = true;
+  const privatePath = "/tmp/SECRET_SESSION_PATH/transcript.jsonl";
+  const context = {
+    hasUI: true,
+    isIdle: () => idle,
+    sessionManager: {
+      getSessionFile: () => privatePath,
+      getSessionId: () => "SECRET_SESSION_ID",
+    },
+  };
+  await handlers.get("session_start")?.({ reason: "startup" }, context);
+  await waitFor(() => stateRequests(requests).length === 1);
+
+  const rawLabel = `  approve\n\t\u0000\u007f\u0085  ${"🙂".repeat(80)}  `;
+  eventHandlers.get("shepherd:blocked")?.(
+    {
+      active: true,
+      label: rawLabel,
+      cwd: "SECRET_CWD",
+      model: "SECRET_MODEL",
+      future: { transcript: "SECRET_TRANSCRIPT" },
+    },
+    context,
+  );
+  await waitFor(() => stateRequests(requests).length === 2);
+
+  const blocked = stateRequests(requests).at(-1)!;
+  expect(Object.keys(blocked.params).sort()).toEqual([
+    "agent",
+    "message",
+    "pane_id",
+    "seq",
+    "source",
+    "state",
+  ]);
+  expect(blocked.params.state).toBe("blocked");
+  expect(blocked.params.message).toBe(`approve ${"🙂".repeat(62)}`);
+  expect(Buffer.byteLength(String(blocked.params.message), "utf8")).toBeLessThanOrEqual(256);
+  expect(JSON.stringify(blocked)).not.toContain("SECRET_");
+
+  eventHandlers.get("shepherd:blocked")?.({ active: false, cwd: "SECRET_CWD" }, context);
+  await waitFor(() => stateRequests(requests).length === 3);
+  const restored = stateRequests(requests).at(-1)!;
+  expect(Object.keys(restored.params).sort()).toEqual([
+    "agent",
+    "pane_id",
+    "seq",
+    "source",
+    "state",
+  ]);
+  expect(restored.params.state).toBe("idle");
+  expect(JSON.stringify(restored)).not.toContain("SECRET_");
+
+  idle = false;
+  handlers.get("agent_start")?.({}, context);
+  await waitFor(() => stateRequests(requests).length === 4);
+  expect(stateRequests(requests).at(-1)?.params.agent_session_path).toBe(privatePath);
+});
+
+test("Pi attention counters settle once and reset with the root session", async () => {
+  const requests = await startRecordingServer("pi-attention-counter");
+  const { eventHandlers, handlers, pi } = createExtensionHarness();
+  const { default: install } = await importFresh("./pi/shepherd-agent-state.ts");
+  install(pi);
+
+  const context = piContext(() => true);
+  await handlers.get("session_start")?.({ reason: "startup" }, context);
+  await waitFor(() => requestStates(requests).length === 1);
+  eventHandlers.get("shepherd:blocked")?.({ active: true, label: "first" }, context);
+  eventHandlers.get("shepherd:blocked")?.({ active: true, label: "second" }, context);
+  await waitFor(() => requestStates(requests).length === 3);
+  eventHandlers.get("shepherd:blocked")?.({ active: false }, context);
+  await Bun.sleep(25);
+  expect(requestStates(requests)).toEqual(["idle", "blocked", "blocked"]);
+  eventHandlers.get("shepherd:blocked")?.({ active: false }, context);
+  await waitFor(() => requestStates(requests).length === 4);
+  eventHandlers.get("shepherd:blocked")?.({ active: false }, context);
+  await Bun.sleep(25);
+  expect(requestStates(requests)).toEqual(["idle", "blocked", "blocked", "idle"]);
+
+  eventHandlers.get("shepherd:blocked")?.({ active: true, label: "stale" }, context);
+  await waitFor(() => requestStates(requests).length === 5);
+  handlers.get("session_shutdown")?.({}, context);
+  await handlers.get("session_start")?.({ reason: "reload" }, context);
+  await waitFor(() => requestStates(requests).length === 6);
+  expect(requestStates(requests).at(-1)).toBe("idle");
+});
+
+test("Pi attention transport fails open when socket creation throws", async () => {
+  configureIntegrationEnvironment("throwing-socket");
+  net.createConnection = (() => {
+    throw new Error("socket unavailable");
+  }) as typeof net.createConnection;
+  const { handlers, pi } = createExtensionHarness();
+  const { default: install } = await importFresh("./pi/shepherd-agent-state.ts");
+  install(pi);
+
+  await expect(
+    handlers.get("session_start")?.(
+      { reason: "startup" },
+      piContextWithSession("private-session", () => true),
+    ),
+  ).resolves.toBeUndefined();
+});
+
 test("Pi projects an active root workflow through a fixed bounded label", async () => {
   const requests = await startRecordingServer("pi-workflow-active");
   const { handlers, pi } = createExtensionHarness();
@@ -796,6 +907,17 @@ function requestStates(requests: unknown[]): unknown[] {
   return requests
     .filter((request) => isRecord(request) && request.method === "pane.report_agent")
     .map(requestState);
+}
+
+function stateRequests(
+  requests: unknown[],
+): Array<{ request: Record<string, unknown>; params: Record<string, unknown> }> {
+  return requests.flatMap((request) => {
+    if (!isRecord(request) || request.method !== "pane.report_agent" || !isRecord(request.params)) {
+      return [];
+    }
+    return [{ request, params: request.params }];
+  });
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
