@@ -938,16 +938,18 @@ mod tests {
         crate::config::test_config_env_lock()
     }
 
-    fn unique_test_path(name: &str) -> PathBuf {
+    fn unique_test_path() -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("shepherd-{name}-{}-{nanos}", std::process::id()))
+        std::env::temp_dir().join(format!("s-{}-{nanos}", std::process::id()))
     }
 
     fn read_line(stream: &mut LocalStream) -> String {
-        let mut reader = BufReader::new(stream);
+        // This helper is recreated for each line, so prevent read-ahead from
+        // consuming bytes that the next call must observe.
+        let mut reader = BufReader::with_capacity(1, stream);
         let mut line = String::new();
         reader.read_line(&mut line).unwrap();
         line
@@ -956,7 +958,7 @@ mod tests {
     fn local_stream_pair() -> (LocalStream, LocalStream, PathBuf) {
         // macOS Unix socket paths have a smaller limit than Linux, so keep the
         // already unique test filename compact.
-        let path = unique_test_path("api");
+        let path = unique_test_path();
         let listener = crate::ipc::bind_local_listener(&path).unwrap();
         let client = crate::ipc::connect_local_stream(&path).unwrap();
         let server = listener.accept().unwrap();
@@ -1038,8 +1040,8 @@ mod tests {
     #[test]
     fn socket_path_defaults_to_config_dir_even_when_xdg_runtime_dir_is_set() {
         let _guard = env_lock().lock().unwrap();
-        let config_home = unique_test_path("socket-default-config-home");
-        let runtime_dir = unique_test_path("socket-default-runtime");
+        let config_home = unique_test_path();
+        let runtime_dir = unique_test_path();
         std::env::remove_var(crate::api::SOCKET_PATH_ENV_VAR);
         std::env::remove_var(crate::session::SESSION_ENV_VAR);
         crate::session::clear_explicit_session_for_test();
@@ -1058,7 +1060,7 @@ mod tests {
     #[test]
     fn socket_path_uses_named_session_dir() {
         let _guard = env_lock().lock().unwrap();
-        let config_home = unique_test_path("socket-named-config-home");
+        let config_home = unique_test_path();
         std::env::remove_var(crate::api::SOCKET_PATH_ENV_VAR);
         crate::session::clear_explicit_session_for_test();
         std::env::set_var(crate::session::SESSION_ENV_VAR, "work");
@@ -1077,7 +1079,7 @@ mod tests {
 
     #[test]
     fn restrict_socket_permissions_sets_user_only_mode() {
-        let dir = unique_test_path("socket-perms");
+        let dir = unique_test_path();
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("api.sock");
         let _listener = UnixListener::bind(&path).unwrap();
