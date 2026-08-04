@@ -331,29 +331,17 @@ fn detection_uses_cached_manifest_until_explicit_reload() {
     });
 }
 
-fn bundled_manifest_for_fixture_agent(agent: &str) -> Option<(Agent, LoadedManifest)> {
-    let (agent, manifest) = match agent {
-        "copilot" => (
-            Agent::GithubCopilot,
-            include_str!("../manifests/github-copilot.toml"),
-        ),
-        "amp" => (Agent::Amp, include_str!("../manifests/amp.toml")),
-        "agy" | "antigravity" => (
-            Agent::Antigravity,
-            include_str!("../manifests/antigravity.toml"),
-        ),
-        "kiro" => (Agent::Kiro, include_str!("../manifests/kiro.toml")),
-        _ => return None,
-    };
+// Resolves purely from the fixture directory name (matched against the same
+// canonical id/alias table `parse_agent_label` uses) plus the bundled
+// manifest table, so a community submission's fixture directory is picked up
+// automatically once its manifest is bundled — no per-agent match arm to
+// maintain here for every new submission.
+fn bundled_manifest_for_fixture_agent(agent_dir_name: &str) -> Option<(Agent, LoadedManifest)> {
+    let agent = parse_agent_label(agent_dir_name)?;
+    let manifest = bundled_manifest(agent)?;
     Some((
         agent,
-        bundled_loaded_manifest(
-            agent,
-            parse_manifest(manifest).expect("bundled manifest should parse"),
-            None,
-            None,
-            false,
-        ),
+        bundled_loaded_manifest(agent, manifest, None, None, false),
     ))
 }
 
