@@ -58,35 +58,25 @@ This section applies only to verified maintainers as defined under Scope and
 Audience. Everyone else must skip this section and follow the external
 contributor guardrail.
 
-### Multi-agent isolation
+### Direct maintainer workflow
 
-Read-only investigation can happen in the shared checkout.
+Work directly in the shared integration checkout on its current integration branch. Do not create
+a task branch, clone, or worktree unless the human explicitly requests isolation for that task.
 
-Small changes or small tasks are fine in the default main worktree. If you find unrelated implementation changes already in progress in the main worktree, use a dedicated worktree instead. Use a dedicated worktree for bigger features too.
+Preserve unrelated changes already present in the checkout. If requested work overlaps dirty or
+in-progress files, stop and get alignment instead of moving the task into another checkout on your
+own.
 
-Use this layout:
+After implementation and required validation, commit and push the current integration branch
+directly. Do not open a pull request unless the human explicitly requests one. When a pull request
+is requested, follow its review and CI requirements through completion and never merge it unless
+the human explicitly directs the merge.
 
-- shared integration checkout: `../shepherd`
-- task worktrees: `../shepherd-worktrees/<task-slug>`
-- task branches: `issue/<id>-<slug>` when an issue exists
-
-Do all code edits, tests, and validation inside the task worktree.
-
-Commit on the task branch in that worktree.
-
-For substantive feature and bug-fix work, default to opening a pull request instead of pushing `master` directly. Small, low-risk changes and documentation-only updates can use a lighter workflow when Can prefers it.
-
-Immediately before opening a pull request, fetch `origin` and make sure the task branch is based on the current `origin/master`; rebase it when behind, then rerun relevant validation before pushing. If `master` advances while the pull request is under review and GitHub marks it behind, update the branch and repeat checks and bot review on the new head.
-
-After opening or updating a pull request, monitor all checks to completion with `gh pr checks --watch` or an equivalent command. Treat Greptile and CodeRabbit as part of CI: wait for both to review the latest pushed commit, not only for the build and test jobs to pass. Evaluate every actionable finding. Fix findings you agree with and reply with the fix; reply inline with a concise technical reason when you disagree. After any fix, wait for CI and both review bots again on the new head.
-
-When the current pull request head is green and both bot reviews are complete, report that it is ready and stop. Never merge a pull request; Can performs the final merge.
-
-If the current session is already inside an isolated task worktree, keep using it. Do not create nested worktrees.
+Before pushing, fetch the integration branch from `origin`, reconcile any remote commits without
+discarding local or unrelated work, and rerun validation when reconciliation changes the tested
+tree.
 
 Before committing, propose the commit message and get alignment.
-
-After Can confirms the change is integrated, update the shared checkout, remove the task worktree, and delete the task branch locally and remotely.
 
 ## Testing
 
