@@ -459,6 +459,7 @@ impl App {
             terminal_title_stripped: terminal.terminal_title_stripped(),
             display_agent: presentation.display_agent,
             agent_status: pane_agent_status(terminal.state, pane.seen),
+            state_source: terminal_agent_state_source(terminal),
             state_labels: presentation.state_labels,
             tokens: terminal.metadata_tokens.values(),
             agent_session: terminal_agent_session_info(terminal),
@@ -538,4 +539,53 @@ fn terminal_agent_session_info(
             kind: session.session_ref.kind,
             value: session.session_ref.value.clone(),
         })
+}
+
+/// Converts the neutral terminal-boundary projection into the wire schema
+/// type. This is the one place `PaneInfo` and `AgentInfo` both go through
+/// (`AgentInfo` reuses the already-computed `PaneInfo.state_source` rather
+/// than calling this again) so the two can never disagree for the same
+/// terminal.
+fn terminal_agent_state_source(
+    terminal: &crate::terminal::TerminalState,
+) -> Option<crate::api::schema::AgentStateSource> {
+    let evidence = terminal.agent_state_evidence()?;
+    Some(crate::api::schema::AgentStateSource {
+        effective: agent_state_effective(evidence.effective),
+        reporter: evidence
+            .reporter
+            .map(|reporter| crate::api::schema::AgentStateReporter {
+                source: reporter.source,
+                authority: agent_state_authority(reporter.authority),
+            }),
+    })
+}
+
+fn agent_state_effective(
+    effective: crate::terminal::EffectiveStateEvidence,
+) -> crate::api::schema::AgentStateEffective {
+    match effective {
+        crate::terminal::EffectiveStateEvidence::Screen => {
+            crate::api::schema::AgentStateEffective::Screen
+        }
+        crate::terminal::EffectiveStateEvidence::Reported { source, authority } => {
+            crate::api::schema::AgentStateEffective::Reported {
+                source,
+                authority: agent_state_authority(authority),
+            }
+        }
+    }
+}
+
+fn agent_state_authority(
+    authority: crate::terminal::StateEvidenceAuthority,
+) -> crate::api::schema::AgentStateAuthority {
+    match authority {
+        crate::terminal::StateEvidenceAuthority::ExclusiveLifecycle => {
+            crate::api::schema::AgentStateAuthority::ExclusiveLifecycle
+        }
+        crate::terminal::StateEvidenceAuthority::Mixed => {
+            crate::api::schema::AgentStateAuthority::Mixed
+        }
+    }
 }

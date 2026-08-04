@@ -809,6 +809,7 @@ fn render_integration_target_list(
     rows: &[SettingsRow],
 ) {
     let p = &app.palette;
+    let observations = crate::integration::integration_observations(app.terminals.values());
 
     let footer = integrations_footer_paragraph(app);
     let footer_height = integrations_footer_height(app, area.width);
@@ -885,9 +886,8 @@ fn render_integration_target_list(
         } else {
             Style::default().fg(p.subtext0)
         };
-        let status = item
-            .unavailable_reason()
-            .unwrap_or_else(|| item.status_label());
+        let observation = observations.get(target).copied().unwrap_or_default();
+        let status = integration_status_text(item, observation);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(format!(" {marker} "), marker_style),
@@ -899,6 +899,46 @@ fn render_integration_target_list(
     }
 
     frame.render_widget(footer, layout[5]);
+}
+
+/// Appends a descriptive, non-health-verdict runtime observation to the
+/// existing install-state label. Wording/counts are client presentation;
+/// the underlying exact-source counts come from
+/// `crate::integration::integration_observations`.
+fn integration_status_text(
+    item: &crate::integration::IntegrationRecommendation,
+    observation: crate::integration::IntegrationObservation,
+) -> String {
+    let base = item
+        .unavailable_reason()
+        .unwrap_or_else(|| item.status_label());
+    if item.state == crate::integration::IntegrationStatusKind::NotInstalled {
+        return base.to_string();
+    }
+    if observation.is_absent() {
+        return format!("{base}; not currently observed");
+    }
+    if observation.reporting_terminals > 0 {
+        format!(
+            "{base} · reporting in {} pane{}",
+            observation.reporting_terminals,
+            if observation.reporting_terminals == 1 {
+                ""
+            } else {
+                "s"
+            }
+        )
+    } else {
+        format!(
+            "{base} · session identity in {} pane{}",
+            observation.session_identity_terminals,
+            if observation.session_identity_terminals == 1 {
+                ""
+            } else {
+                "s"
+            }
+        )
+    }
 }
 
 fn render_integration_action_menu(

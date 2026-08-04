@@ -26,6 +26,18 @@ pub(crate) fn integration_target_label(
     }
 }
 
+/// Maps a hook/session-ref source string to its owning `IntegrationTarget`
+/// by exact `shepherd:<label>` match only, so an unregistered or mismatched
+/// custom source is never guessed or misattributed to a named integration.
+pub(crate) fn integration_target_for_source(
+    source: &str,
+) -> Option<crate::api::schema::IntegrationTarget> {
+    let label = source.strip_prefix("shepherd:")?;
+    crate::api::schema::IntegrationTarget::ALL
+        .into_iter()
+        .find(|&target| integration_target_label(target) == label)
+}
+
 pub(crate) fn integration_target_command(
     target: crate::api::schema::IntegrationTarget,
 ) -> &'static str {

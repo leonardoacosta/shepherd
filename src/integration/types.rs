@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -295,4 +296,69 @@ pub(crate) struct HermesUninstallResult {
     pub config_path: PathBuf,
     pub removed_plugin_dir: bool,
     pub updated_config: bool,
+}
+
+/// Exact-source runtime observation for one integration target: how many
+/// terminals currently report state through its canonical source, and how
+/// many carry that source's session identity (session-identity-only
+/// integrations like Hermes never populate `reporting_terminals`). Absence
+/// is zero on both counts, never a health verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct IntegrationObservation {
+    pub reporting_terminals: usize,
+    pub session_identity_terminals: usize,
+}
+
+impl IntegrationObservation {
+    pub fn is_absent(&self) -> bool {
+        self.reporting_terminals == 0 && self.session_identity_terminals == 0
+    }
+}
+
+/// Aggregates exact canonical-source observations across all terminals in
+/// one pass. Only a `TerminalState::agent_state_evidence()` reporter or a
+/// session-ref source that exactly matches a registered `IntegrationTarget`
+/// contributes; unmatched/custom sources contribute to no target and never
+/// surface a session identifier here.
+pub(crate) fn integration_observations<'a>(
+    terminals: impl Iterator<Item = &'a crate::terminal::TerminalState>,
+) -> HashMap<crate::api::schema::IntegrationTarget, IntegrationObservation> {
+    let mut observations: HashMap<crate::api::schema::IntegrationTarget, IntegrationObservation> =
+        HashMap::new();
+    for terminal in terminals {
+        if let Some(source) = terminal
+            .agent_state_evidence()
+            .and_then(|evidence| evidence.reporter)
+            .map(|reporter| reporter.source)
+        {
+            if let Some(target) = super::registry::integration_target_for_source(&source) {
+                observations.entry(target).or_default().reporting_terminals += 1;
+            }
+        }
+        if let Some(source) = terminal_session_identity_source(terminal) {
+            if let Some(target) = super::registry::integration_target_for_source(&source) {
+                observations
+                    .entry(target)
+                    .or_default()
+                    .session_identity_terminals += 1;
+            }
+        }
+    }
+    observations
+}
+
+/// Session identity alone, independent of current reporting authority —
+/// mirrors `terminal_agent_session_info`'s hook-authority-then-persisted
+/// precedence in `src/app/creation.rs` without exposing the session
+/// identifier itself, only its owning source.
+fn terminal_session_identity_source(terminal: &crate::terminal::TerminalState) -> Option<String> {
+    if let Some(authority) = terminal.hook_authority.as_ref() {
+        if authority.session_ref.is_some() {
+            return Some(authority.source.clone());
+        }
+    }
+    terminal
+        .persisted_agent_session
+        .as_ref()
+        .map(|session| session.source.clone())
 }

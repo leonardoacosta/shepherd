@@ -20,7 +20,8 @@ pub(crate) use registry::{
     print_outdated_update_notice,
 };
 pub(crate) use types::{
-    IntegrationAction, IntegrationRecommendation, IntegrationStatus, IntegrationStatusKind,
+    integration_observations, IntegrationAction, IntegrationObservation, IntegrationRecommendation,
+    IntegrationStatus, IntegrationStatusKind,
 };
 
 const PI_EXTENSION_INSTALL_NAME: &str = "shepherd-agent-state.ts";

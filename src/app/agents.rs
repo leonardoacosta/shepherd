@@ -369,6 +369,17 @@ impl App {
             return None;
         }
         let pane = self.pane_info(ws_idx, pane_id)?;
+        // Derived from the same shared projection as `pane.state_source` (not
+        // recomputed from `terminal`), so `AgentInfo` and `PaneInfo` can never
+        // disagree for this terminal. Equivalent by construction to the prior
+        // `terminal.full_lifecycle_hook_authority_active()` derivation.
+        let screen_detection_skipped = matches!(
+            pane.state_source.as_ref().map(|source| &source.effective),
+            Some(crate::api::schema::AgentStateEffective::Reported {
+                authority: crate::api::schema::AgentStateAuthority::ExclusiveLifecycle,
+                ..
+            })
+        );
         Some(crate::api::schema::AgentInfo {
             terminal_id: pane.terminal_id,
             name: terminal.agent_name.clone(),
@@ -378,7 +389,8 @@ impl App {
             terminal_title_stripped: pane.terminal_title_stripped,
             display_agent: pane.display_agent,
             agent_status: pane.agent_status,
-            screen_detection_skipped: terminal.full_lifecycle_hook_authority_active(),
+            screen_detection_skipped,
+            state_source: pane.state_source,
             state_labels: pane.state_labels,
             tokens: pane.tokens,
             agent_session: pane.agent_session,
@@ -486,5 +498,109 @@ mod tests {
         ] {
             assert!(!valid_agent_name(name), "expected {name:?} to be invalid");
         }
+    }
+
+    fn test_app_with_pane(name: &str) -> (crate::app::App, crate::layout::PaneId) {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(
+            &crate::config::Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new(name)];
+        app.state.ensure_test_terminals();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        (app, pane_id)
+    }
+
+    /// Characterizes that `AgentInfo` and `PaneInfo` can never disagree for
+    /// the same terminal, because `AgentInfo.state_source` is `PaneInfo`'s
+    /// already-computed field rather than an independently recomputed value.
+    #[test]
+    fn agent_info_and_pane_info_share_state_source_projection() {
+        let (mut app, pane_id) = test_app_with_pane("state-source-parity");
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_hook_authority(
+                "shepherd:codex".to_string(),
+                "codex".to_string(),
+                crate::detect::AgentState::Working,
+                None,
+                Some(1),
+            );
+
+        let pane = app.pane_info(0, pane_id).expect("pane info");
+        let agent = app.agent_info(0, pane_id).expect("agent info");
+
+        assert!(pane.state_source.is_some());
+        assert_eq!(pane.state_source, agent.state_source);
+        assert_eq!(
+            agent.screen_detection_skipped,
+            matches!(
+                agent.state_source.as_ref().map(|source| &source.effective),
+                Some(crate::api::schema::AgentStateEffective::Reported {
+                    authority: crate::api::schema::AgentStateAuthority::ExclusiveLifecycle,
+                    ..
+                })
+            )
+        );
+    }
+
+    /// Same terminal projection, exercised through the exclusive-lifecycle
+    /// path so `screen_detection_skipped` stays true by construction.
+    #[test]
+    fn agent_info_and_pane_info_agree_for_exclusive_lifecycle_authority() {
+        let (mut app, pane_id) = test_app_with_pane("state-source-parity-exclusive");
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        {
+            let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+            terminal.set_detected_state(
+                Some(crate::detect::Agent::Pi),
+                crate::detect::AgentState::Idle,
+            );
+            // A full-lifecycle report needs a session anchor (persisted or
+            // matching `hook_authority`) before `route_full_lifecycle_hook_report`
+            // accepts it — see `src/terminal/state.rs`'s `session_anchored` check.
+            terminal.set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+                source: "shepherd:pi".into(),
+                agent: "pi".into(),
+                session_ref: crate::agent_resume::AgentSessionRef::id("pi-session").unwrap(),
+            });
+            terminal.set_hook_authority(
+                "shepherd:pi".to_string(),
+                "pi".to_string(),
+                crate::detect::AgentState::Working,
+                None,
+                Some(1),
+            );
+        }
+
+        let pane = app.pane_info(0, pane_id).expect("pane info");
+        let agent = app.agent_info(0, pane_id).expect("agent info");
+
+        assert_eq!(pane.state_source, agent.state_source);
+        assert!(agent.screen_detection_skipped);
+        assert_eq!(
+            agent.state_source,
+            Some(crate::api::schema::AgentStateSource {
+                effective: crate::api::schema::AgentStateEffective::Reported {
+                    source: "shepherd:pi".into(),
+                    authority: crate::api::schema::AgentStateAuthority::ExclusiveLifecycle,
+                },
+                reporter: Some(crate::api::schema::AgentStateReporter {
+                    source: "shepherd:pi".into(),
+                    authority: crate::api::schema::AgentStateAuthority::ExclusiveLifecycle,
+                }),
+            })
+        );
     }
 }

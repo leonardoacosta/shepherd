@@ -152,3 +152,45 @@ pub enum AgentStatus {
 pub(crate) fn default_true() -> bool {
     true
 }
+
+/// Whether a reported source has exclusive lifecycle authority (a full-lifecycle
+/// hook integration) or mixed authority (a session-only/custom report that can
+/// yield to screen evidence when a newer visible blocker takes over).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentStateAuthority {
+    ExclusiveLifecycle,
+    Mixed,
+}
+
+/// The evidence that produced the pane's effective state: either the screen
+/// manifest or a reported source with its authority kind.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AgentStateEffective {
+    Screen,
+    Reported {
+        source: String,
+        authority: AgentStateAuthority,
+    },
+}
+
+/// A currently effective reporter observation, kept separate from `effective`
+/// so a mixed report overridden by a newer screen blocker is still visible
+/// as an active reporter without claiming it authored the effective state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentStateReporter {
+    pub source: String,
+    pub authority: AgentStateAuthority,
+}
+
+/// Typed state-evidence projection shared by `PaneInfo` and `AgentInfo`,
+/// produced by one terminal projection helper so the two can never disagree
+/// for the same terminal. Session identity is a separate fact and never
+/// populates `reporter` on its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentStateSource {
+    pub effective: AgentStateEffective,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reporter: Option<AgentStateReporter>,
+}

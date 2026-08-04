@@ -698,6 +698,26 @@ Session-only official integrations report native session references with `pane.r
 
 If no native session reference is stored, the field is omitted.
 
+`pane.get`, `pane.list`, `agent.get`, and `agent.list` also expose a read-only `state_source` object whenever the pane has current agent evidence, produced by one shared server-side projection so `PaneInfo` and `AgentInfo` always agree for the same terminal:
+
+```json
+{
+  "state_source": {
+    "effective": {
+      "kind": "reported",
+      "source": "shepherd:codex",
+      "authority": "exclusive_lifecycle"
+    },
+    "reporter": {
+      "source": "shepherd:codex",
+      "authority": "exclusive_lifecycle"
+    }
+  }
+}
+```
+
+`effective.kind` is `"screen"` or `"reported"`. `"screen"` means the effective state came from screen-manifest detection; `"reported"` means it came from a hook-reported `source`, with `authority` either `"exclusive_lifecycle"` (a live full-lifecycle integration) or `"mixed"` (a session-only/custom report that can yield to a newer visible screen blocker). `reporter` is a separate, optional field: it stays populated with the currently effective hook report even when a newer screen blocker overrides `effective` to `"screen"`, so a still-active mixed reporter is never hidden. `reporter` is absent once the report is cleared, its owning process exits, or it otherwise stops being effective — a persisted or reported session identity alone (`agent_session`) never populates it. `state_source` is omitted when the pane has neither screen-detected nor reported agent state. `AgentInfo.screen_detection_skipped` remains a derived compatibility field: it is `true` exactly when `state_source.effective` is `"reported"` with `"exclusive_lifecycle"` authority.
+
 `pane.get`, `pane.list`, `agent.get`, and `agent.list` also expose `foreground_cwd` when Shepherd can resolve the cwd of the process currently controlling the pane PTY. The existing `cwd` field remains the pane/workspace cwd used for labels, follow-cwd behavior, and restored session state.
 
 `PaneInfo` and `AgentInfo` expose optional `terminal_title` and `terminal_title_stripped` fields. `terminal_title` is the latest OSC 0/2 title after safety normalization. `terminal_title_stripped` removes one recognized leading activity or spinner glyph and following whitespace. These server-owned values are ephemeral across a cold restart and are independent of the metadata `title` and semantic agent state.

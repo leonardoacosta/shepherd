@@ -92,6 +92,45 @@ pub(crate) struct TerminalTitleChange {
     pub(crate) stripped_changed: bool,
 }
 
+/// Whether a reported source has exclusive lifecycle authority (a full-lifecycle
+/// hook integration) or mixed authority (a session-only/custom report that can
+/// yield to screen evidence). Neutral counterpart of `api::schema::AgentStateAuthority`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateEvidenceAuthority {
+    ExclusiveLifecycle,
+    Mixed,
+}
+
+/// The evidence that produced the terminal's effective state: either the
+/// screen manifest or a reported source with its authority kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EffectiveStateEvidence {
+    Screen,
+    Reported {
+        source: String,
+        authority: StateEvidenceAuthority,
+    },
+}
+
+/// A currently effective hook-authority observation, kept separate from
+/// `effective` so a mixed report overridden by a newer screen blocker is
+/// still visible as an active reporter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateEvidenceReporter {
+    pub source: String,
+    pub authority: StateEvidenceAuthority,
+}
+
+/// Terminal-boundary state-evidence projection, shared by `PaneInfo` and
+/// `AgentInfo` through one helper so the two can never disagree for the same
+/// terminal. Session identity (`persisted_agent_session` / `session_ref`) is
+/// a separate fact and never populates `reporter` on its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentStateEvidence {
+    pub effective: EffectiveStateEvidence,
+    pub reporter: Option<StateEvidenceReporter>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TerminalStateMutation {
     pub effective_state_change: Option<EffectiveStateChange>,
@@ -1761,6 +1800,49 @@ impl TerminalState {
         })
     }
 
+    /// Reads existing arbitration (`hook_authority_is_effective`,
+    /// `visible_blocker_overrides_hook`) without adding new rules. Returns
+    /// `None` only when there is no current agent evidence at all — no
+    /// screen classification and no effective hook authority. Reporter
+    /// observations disappear once authority is cleared, the owning process
+    /// exits, or the report otherwise stops being effective, matching
+    /// `hook_authority_is_effective`.
+    pub fn agent_state_evidence(&self) -> Option<AgentStateEvidence> {
+        let reporter = self
+            .hook_authority
+            .as_ref()
+            .filter(|authority| self.hook_authority_is_effective(authority))
+            .map(|authority| StateEvidenceReporter {
+                source: authority.source.clone(),
+                authority: if crate::detect::full_lifecycle_hook_authority(
+                    &authority.source,
+                    &authority.agent_label,
+                ) {
+                    StateEvidenceAuthority::ExclusiveLifecycle
+                } else {
+                    StateEvidenceAuthority::Mixed
+                },
+            });
+
+        let effective = if self.visible_blocker_overrides_hook() {
+            EffectiveStateEvidence::Screen
+        } else if let Some(reporter) = &reporter {
+            EffectiveStateEvidence::Reported {
+                source: reporter.source.clone(),
+                authority: reporter.authority,
+            }
+        } else if self.detected_agent.is_some() {
+            EffectiveStateEvidence::Screen
+        } else {
+            return None;
+        };
+
+        Some(AgentStateEvidence {
+            effective,
+            reporter,
+        })
+    }
+
     pub fn set_manual_label(&mut self, label: String) {
         let label = label.trim().to_string();
         self.manual_label = (!label.is_empty()).then_some(label);
@@ -3372,6 +3454,146 @@ mod tests {
         assert_eq!(terminal.fallback_state, AgentState::Idle);
         assert_eq!(terminal.state, AgentState::Working);
         assert!(change.is_none());
+    }
+
+    #[test]
+    fn agent_state_source_reports_screen_evidence_with_no_report() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Codex), AgentState::Idle);
+
+        let evidence = terminal.agent_state_evidence().unwrap();
+
+        assert_eq!(evidence.effective, EffectiveStateEvidence::Screen);
+        assert!(evidence.reporter.is_none());
+    }
+
+    #[test]
+    fn agent_state_source_reports_exclusive_lifecycle_evidence() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        anchor_full_lifecycle_session(
+            &mut terminal,
+            Agent::Pi,
+            "shepherd:pi",
+            "pi",
+            crate::agent_resume::AgentSessionRef::path(test_session_path("root.jsonl")).unwrap(),
+        );
+        terminal.set_hook_authority(
+            "shepherd:pi".into(),
+            "pi".into(),
+            AgentState::Working,
+            None,
+            None,
+        );
+
+        let evidence = terminal.agent_state_evidence().unwrap();
+
+        assert_eq!(
+            evidence.effective,
+            EffectiveStateEvidence::Reported {
+                source: "shepherd:pi".into(),
+                authority: StateEvidenceAuthority::ExclusiveLifecycle,
+            }
+        );
+        let reporter = evidence.reporter.unwrap();
+        assert_eq!(reporter.source, "shepherd:pi");
+        assert_eq!(
+            reporter.authority,
+            StateEvidenceAuthority::ExclusiveLifecycle
+        );
+    }
+
+    #[test]
+    fn agent_state_source_reports_mixed_evidence() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Codex), AgentState::Idle);
+        terminal.set_hook_authority(
+            "shepherd:codex".into(),
+            "codex".into(),
+            AgentState::Working,
+            None,
+            None,
+        );
+
+        let evidence = terminal.agent_state_evidence().unwrap();
+
+        assert_eq!(
+            evidence.effective,
+            EffectiveStateEvidence::Reported {
+                source: "shepherd:codex".into(),
+                authority: StateEvidenceAuthority::Mixed,
+            }
+        );
+        let reporter = evidence.reporter.unwrap();
+        assert_eq!(reporter.source, "shepherd:codex");
+        assert_eq!(reporter.authority, StateEvidenceAuthority::Mixed);
+    }
+
+    #[test]
+    fn agent_state_source_screen_override_retains_mixed_reporter() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Codex), AgentState::Idle);
+        terminal.set_hook_authority(
+            "shepherd:codex".into(),
+            "codex".into(),
+            AgentState::Working,
+            None,
+            None,
+        );
+
+        terminal.set_detected_state_with_visible_blocker(
+            Some(Agent::Codex),
+            AgentState::Blocked,
+            true,
+            false,
+            false,
+        );
+
+        let evidence = terminal.agent_state_evidence().unwrap();
+
+        assert_eq!(evidence.effective, EffectiveStateEvidence::Screen);
+        let reporter = evidence.reporter.unwrap();
+        assert_eq!(reporter.source, "shepherd:codex");
+        assert_eq!(reporter.authority, StateEvidenceAuthority::Mixed);
+    }
+
+    #[test]
+    fn agent_state_source_clears_reporter_when_hook_authority_is_cleared() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Codex), AgentState::Idle);
+        terminal.set_hook_authority(
+            "shepherd:codex".into(),
+            "codex".into(),
+            AgentState::Working,
+            None,
+            Some(1),
+        );
+
+        terminal.clear_hook_authority(None, Some(2));
+
+        let evidence = terminal.agent_state_evidence().unwrap();
+
+        assert_eq!(evidence.effective, EffectiveStateEvidence::Screen);
+        assert!(evidence.reporter.is_none());
+    }
+
+    #[test]
+    fn agent_state_source_persisted_session_alone_is_not_a_reporter() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        terminal.set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+            source: "shepherd:pi".into(),
+            agent: "pi".into(),
+            session_ref: crate::agent_resume::AgentSessionRef::path(test_session_path(
+                "persisted.jsonl",
+            ))
+            .unwrap(),
+        });
+
+        let evidence = terminal.agent_state_evidence().unwrap();
+
+        assert_eq!(evidence.effective, EffectiveStateEvidence::Screen);
+        assert!(evidence.reporter.is_none());
     }
 
     #[test]

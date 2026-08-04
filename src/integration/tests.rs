@@ -3879,3 +3879,110 @@ fn grok_dir_honors_grok_home_after_config_dir_seam() {
     clear_integration_path_env();
     let _ = fs::remove_dir_all(base);
 }
+
+#[test]
+fn integration_observations_counts_exact_canonical_reporters() {
+    let mut reporting = crate::terminal::TerminalState::new(
+        crate::terminal::TerminalId::alloc(),
+        std::env::temp_dir(),
+    );
+    reporting.set_detected_state(
+        Some(crate::detect::Agent::Codex),
+        crate::detect::AgentState::Idle,
+    );
+    reporting.set_hook_authority(
+        "shepherd:codex".to_string(),
+        "codex".to_string(),
+        crate::detect::AgentState::Working,
+        None,
+        None,
+    );
+    let mut other_reporting = crate::terminal::TerminalState::new(
+        crate::terminal::TerminalId::alloc(),
+        std::env::temp_dir(),
+    );
+    other_reporting.set_detected_state(
+        Some(crate::detect::Agent::Codex),
+        crate::detect::AgentState::Idle,
+    );
+    other_reporting.set_hook_authority(
+        "shepherd:codex".to_string(),
+        "codex".to_string(),
+        crate::detect::AgentState::Working,
+        None,
+        None,
+    );
+    let terminals = [reporting, other_reporting];
+
+    let observations = integration_observations(terminals.iter());
+
+    let codex = observations
+        .get(&crate::api::schema::IntegrationTarget::Codex)
+        .copied()
+        .unwrap_or_default();
+    assert_eq!(codex.reporting_terminals, 2);
+}
+
+#[test]
+fn integration_observations_are_absent_without_current_reporters() {
+    let idle = crate::terminal::TerminalState::new(
+        crate::terminal::TerminalId::alloc(),
+        std::env::temp_dir(),
+    );
+    let terminals = [idle];
+
+    let observations = integration_observations(terminals.iter());
+
+    let codex = observations
+        .get(&crate::api::schema::IntegrationTarget::Codex)
+        .copied()
+        .unwrap_or_default();
+    assert!(codex.is_absent());
+}
+
+#[test]
+fn integration_observations_never_attribute_unregistered_custom_sources() {
+    let mut terminal = crate::terminal::TerminalState::new(
+        crate::terminal::TerminalId::alloc(),
+        std::env::temp_dir(),
+    );
+    terminal.set_detected_state(
+        Some(crate::detect::Agent::Codex),
+        crate::detect::AgentState::Idle,
+    );
+    terminal.set_hook_authority(
+        "custom:codex".to_string(),
+        "codex".to_string(),
+        crate::detect::AgentState::Working,
+        None,
+        None,
+    );
+    let terminals = [terminal];
+
+    let observations = integration_observations(terminals.iter());
+
+    assert!(observations.is_empty());
+}
+
+#[test]
+fn integration_observations_count_session_identity_without_a_live_report() {
+    let mut terminal = crate::terminal::TerminalState::new(
+        crate::terminal::TerminalId::alloc(),
+        std::env::temp_dir(),
+    );
+    terminal.set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+        source: "shepherd:pi".into(),
+        agent: "pi".into(),
+        session_ref: crate::agent_resume::AgentSessionRef::id("pi-session").unwrap(),
+    });
+    let terminals = [terminal];
+
+    let observations = integration_observations(terminals.iter());
+
+    let pi = observations
+        .get(&crate::api::schema::IntegrationTarget::Pi)
+        .copied()
+        .unwrap_or_default();
+    assert_eq!(pi.reporting_terminals, 0);
+    assert_eq!(pi.session_identity_terminals, 1);
+}

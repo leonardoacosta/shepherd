@@ -69,6 +69,89 @@
           ],
           "type": "string"
         },
+        "AgentStateAuthority": {
+          "description": "Whether a reported source has exclusive lifecycle authority (a full-lifecycle\nhook integration) or mixed authority (a session-only/custom report that can\nyield to screen evidence when a newer visible blocker takes over).",
+          "enum": [
+            "exclusive_lifecycle",
+            "mixed"
+          ],
+          "type": "string"
+        },
+        "AgentStateEffective": {
+          "description": "The evidence that produced the pane's effective state: either the screen\nmanifest or a reported source with its authority kind.",
+          "oneOf": [
+            {
+              "properties": {
+                "kind": {
+                  "const": "screen",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "authority": {
+                  "$ref": "#/schemas/event/$defs/AgentStateAuthority"
+                },
+                "kind": {
+                  "const": "reported",
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "source",
+                "authority"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "AgentStateReporter": {
+          "description": "A currently effective reporter observation, kept separate from `effective`\nso a mixed report overridden by a newer screen blocker is still visible\nas an active reporter without claiming it authored the effective state.",
+          "properties": {
+            "authority": {
+              "$ref": "#/schemas/event/$defs/AgentStateAuthority"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "authority"
+          ],
+          "type": "object"
+        },
+        "AgentStateSource": {
+          "description": "Typed state-evidence projection shared by `PaneInfo` and `AgentInfo`,\nproduced by one terminal projection helper so the two can never disagree\nfor the same terminal. Session identity is a separate fact and never\npopulates `reporter` on its own.",
+          "properties": {
+            "effective": {
+              "$ref": "#/schemas/event/$defs/AgentStateEffective"
+            },
+            "reporter": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/AgentStateReporter"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "effective"
+          ],
+          "type": "object"
+        },
         "AgentStatus": {
           "enum": [
             "idle",
@@ -828,6 +911,16 @@
                 "type": "string"
               },
               "type": "object"
+            },
+            "state_source": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/AgentStateSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "tab_id": {
               "type": "string"
@@ -6207,6 +6300,16 @@
               },
               "type": "object"
             },
+            "state_source": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/AgentStateSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "tab_id": {
               "type": "string"
             },
@@ -6346,6 +6449,89 @@
             "path"
           ],
           "type": "string"
+        },
+        "AgentStateAuthority": {
+          "description": "Whether a reported source has exclusive lifecycle authority (a full-lifecycle\nhook integration) or mixed authority (a session-only/custom report that can\nyield to screen evidence when a newer visible blocker takes over).",
+          "enum": [
+            "exclusive_lifecycle",
+            "mixed"
+          ],
+          "type": "string"
+        },
+        "AgentStateEffective": {
+          "description": "The evidence that produced the pane's effective state: either the screen\nmanifest or a reported source with its authority kind.",
+          "oneOf": [
+            {
+              "properties": {
+                "kind": {
+                  "const": "screen",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "authority": {
+                  "$ref": "#/schemas/success_response/$defs/AgentStateAuthority"
+                },
+                "kind": {
+                  "const": "reported",
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "source",
+                "authority"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "AgentStateReporter": {
+          "description": "A currently effective reporter observation, kept separate from `effective`\nso a mixed report overridden by a newer screen blocker is still visible\nas an active reporter without claiming it authored the effective state.",
+          "properties": {
+            "authority": {
+              "$ref": "#/schemas/success_response/$defs/AgentStateAuthority"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "authority"
+          ],
+          "type": "object"
+        },
+        "AgentStateSource": {
+          "description": "Typed state-evidence projection shared by `PaneInfo` and `AgentInfo`,\nproduced by one terminal projection helper so the two can never disagree\nfor the same terminal. Session identity is a separate fact and never\npopulates `reporter` on its own.",
+          "properties": {
+            "effective": {
+              "$ref": "#/schemas/success_response/$defs/AgentStateEffective"
+            },
+            "reporter": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/AgentStateReporter"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "effective"
+          ],
+          "type": "object"
         },
         "AgentStatus": {
           "enum": [
@@ -7480,6 +7666,16 @@
                 "type": "string"
               },
               "type": "object"
+            },
+            "state_source": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/AgentStateSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "tab_id": {
               "type": "string"
