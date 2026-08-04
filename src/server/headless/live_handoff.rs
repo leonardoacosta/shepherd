@@ -106,11 +106,26 @@ impl HeadlessServer {
             .iter()
             .map(|(_, runtime)| runtime.clone())
             .collect();
+        let dock_ownership = self
+            .app
+            .state
+            .workspaces
+            .iter()
+            .enumerate()
+            .filter_map(|(ws_idx, workspace)| {
+                let tab_idx = self.app.state.dock_backing_tab_idx(ws_idx)?;
+                Some(crate::server::handoff::HandoffDockOwnership {
+                    workspace_id: workspace.id.clone(),
+                    pane_id: workspace.tabs[tab_idx].root_pane.raw(),
+                })
+            })
+            .collect();
         let manifest = crate::server::handoff::manifest_for(
             snapshot,
             panes,
             params.expected_protocol,
             params.expected_version,
+            dock_ownership,
         );
         let mut import_child = match crate::server::handoff::spawn_handoff_import(
             import_exe.as_deref(),

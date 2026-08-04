@@ -16,8 +16,22 @@ pub(super) fn ensure_private_parent_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     ensure_private_parent_dir(path)?;
+    atomic_write_in_parent(path, bytes)
+}
+
+/// Atomically replace a user-facing config file without changing permissions
+/// on an existing parent directory (which may be shared, such as `/tmp`).
+pub(crate) fn atomic_write_config(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::other(format!("path {} has no parent", path.display())))?;
+    fs::create_dir_all(parent)?;
+    atomic_write_in_parent(path, bytes)
+}
+
+fn atomic_write_in_parent(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| io::Error::other(format!("path {} has no parent", path.display())))?;
@@ -123,6 +137,21 @@ mod tests {
         let target = temp_path("roundtrip").join("session.json");
         atomic_write(&target, br#"{"version":1}"#).unwrap();
         assert_eq!(fs::read(&target).unwrap(), br#"{"version":1}"#);
+    }
+
+    #[test]
+    fn atomic_config_write_supports_shared_parent_directory() {
+        let target = std::env::temp_dir().join(format!(
+            "shepherd-atomic-config-{}-{}.toml",
+            std::process::id(),
+            now_nanos()
+        ));
+        atomic_write_config(&target, b"[ui]\nmouse_capture = true\n").unwrap();
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "[ui]\nmouse_capture = true\n"
+        );
+        let _ = fs::remove_file(target);
     }
 
     #[cfg(unix)]

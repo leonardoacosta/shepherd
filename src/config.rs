@@ -10,7 +10,7 @@ mod theme;
 mod topbar;
 
 pub use self::{
-    dock::{DockConfig, DockSide},
+    dock::{DockConfig, DockSide, MIN_DOCK_SIZE},
     io::{
         config_diagnostic_summary, config_dir, config_path, load_live_config,
         remove_keybinding_config_sections, remove_section_key, state_dir, upsert_section_bool,

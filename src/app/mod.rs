@@ -581,6 +581,7 @@ impl App {
             tab_scroll: 0,
             tab_scroll_follow_active: true,
             mobile_switcher_scroll: 0,
+            dock_focus: None,
             view: state::ViewState {
                 layout: state::ViewLayout::Desktop,
                 sidebar_rect: Rect::default(),
@@ -589,6 +590,7 @@ impl App {
                 tab_bar_rect: Rect::default(),
                 topbar_rect: Rect::default(),
                 dock_rect: Rect::default(),
+                dock_pane_info: None,
                 tab_hit_areas: Vec::new(),
                 tab_scroll_left_hit_area: Rect::default(),
                 tab_scroll_right_hit_area: Rect::default(),
@@ -678,6 +680,7 @@ impl App {
                 list: state::SelectionListState::new(0),
                 original_palette: None,
                 original_theme: None,
+                display_message: None,
             },
             integration_recommendations: crate::integration::integration_recommendations(),
             agent_manifest_summaries,
@@ -803,6 +806,7 @@ impl App {
             u32,
             crate::handoff_runtime::ImportedHandoffRuntime,
         >,
+        dock_ownership: &[crate::server::handoff::HandoffDockOwnership],
     ) -> io::Result<Self> {
         let mut app = Self::new(config, true, config_diagnostic, api_rx, event_hub);
         let (workspaces, terminals, runtimes) = crate::persist::restore_handoff(
@@ -835,6 +839,7 @@ impl App {
         app.state.workspaces = workspaces;
         app.state.terminals = terminals;
         app.terminal_runtimes = runtimes.into();
+        app.restore_handoff_dock_ownership(dock_ownership);
         app.state.active = snapshot
             .active
             .filter(|&idx| idx < app.state.workspaces.len());
@@ -861,6 +866,36 @@ impl App {
                 .and_then(|ws| ws.focused_pane_id().map(|pane_id| (idx, pane_id)))
         });
         Ok(app)
+    }
+
+    #[cfg(unix)]
+    fn restore_handoff_dock_ownership(
+        &mut self,
+        dock_ownership: &[crate::server::handoff::HandoffDockOwnership],
+    ) {
+        for ownership in dock_ownership {
+            let Some(ws_idx) = self
+                .state
+                .workspaces
+                .iter()
+                .position(|workspace| workspace.id == ownership.workspace_id)
+            else {
+                continue;
+            };
+            let pane_id = self
+                .state
+                .pane_id_aliases
+                .get(&ownership.pane_id)
+                .copied()
+                .unwrap_or_else(|| crate::layout::PaneId::from_raw(ownership.pane_id));
+            if self
+                .state
+                .runtime_for_pane_in_workspace(&self.terminal_runtimes, ws_idx, pane_id)
+                .is_some()
+            {
+                let _ = self.state.reserve_dock_pane(ws_idx, pane_id);
+            }
+        }
     }
 
     #[cfg(unix)]
@@ -1695,15 +1730,22 @@ impl App {
                         self.paste_into_active_text_input(&text);
                     } else {
                         if let Some(ws_idx) = self.state.active {
-                            if let Some(ws) = self.state.workspaces.get(ws_idx) {
-                                if let Some(focused) = ws.focused_pane_id() {
-                                    if let Some(runtime) = self.state.runtime_for_pane_in_workspace(
-                                        &self.terminal_runtimes,
-                                        ws_idx,
-                                        focused,
-                                    ) {
-                                        let _ = runtime.try_send_paste(text);
-                                    }
+                            self.state.clear_invalid_dock_focus(&self.terminal_runtimes);
+                            let target = self
+                                .state
+                                .focused_dock_pane(&self.terminal_runtimes)
+                                .or_else(|| {
+                                    self.state.workspaces.get(ws_idx).and_then(|workspace| {
+                                        workspace.focused_pane_id().map(|pane_id| (ws_idx, pane_id))
+                                    })
+                                });
+                            if let Some((target_ws_idx, pane_id)) = target {
+                                if let Some(runtime) = self.state.runtime_for_pane_in_workspace(
+                                    &self.terminal_runtimes,
+                                    target_ws_idx,
+                                    pane_id,
+                                ) {
+                                    let _ = runtime.try_send_paste(text);
                                 }
                             }
                         }
@@ -4592,6 +4634,35 @@ mod tests {
     }
 
     #[test]
+    fn pane_close_request_closes_workspace_when_only_hidden_dock_remains() {
+        let mut app = test_app();
+        let mut workspace = Workspace::test_new("api-pane-close-with-dock");
+        let main_pane = workspace.tabs[0].root_pane;
+        let dock_tab = workspace.test_add_tab(Some("dock-backing"));
+        let dock_pane = workspace.tabs[dock_tab].root_pane;
+        app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state
+            .reserve_dock_pane(0, dock_pane)
+            .expect("dock reservation");
+        let main_pane_id = app.pane_info(0, main_pane).unwrap().pane_id;
+
+        let response = app.handle_api_request(crate::api::schema::Request {
+            id: "req_pane_close_with_dock".into(),
+            method: crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
+                pane_id: main_pane_id,
+            }),
+        });
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+
+        assert_eq!(response["result"]["type"], "ok");
+        assert!(app.state.workspaces.is_empty());
+        assert!(app.state.dock_panes.is_empty());
+    }
+
+    #[test]
     fn pane_close_request_requires_confirmation_before_closing_parent_worktree_group() {
         let mut app = test_app();
         let mut parent = Workspace::test_new("api-pane-close-parent");
@@ -5894,6 +5965,45 @@ last_pane = "prefix+tab"
         app.route_client_input(b"\x1b".to_vec());
 
         assert_eq!(app.state.mode, Mode::Terminal);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn live_handoff_dock_ownership_rebinds_remapped_pane_and_ignores_invalid_metadata() {
+        let mut app = test_app();
+        let mut workspace = Workspace::test_new("handoff-dock");
+        let dock_tab = workspace.test_add_tab(Some("dock-backing"));
+        let dock_pane = workspace.tabs[dock_tab].root_pane;
+        let dock_terminal = workspace.tabs[dock_tab].panes[&dock_pane]
+            .attached_terminal_id
+            .clone();
+        let workspace_id = workspace.id.clone();
+        app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        app.terminal_runtimes.insert(
+            dock_terminal,
+            TerminalRuntime::test_with_screen_bytes(20, 10, b"handoff dock"),
+        );
+        let old_pane_id = u32::MAX - 17;
+        app.state.pane_id_aliases.insert(old_pane_id, dock_pane);
+
+        app.restore_handoff_dock_ownership(&[
+            crate::server::handoff::HandoffDockOwnership {
+                workspace_id: "missing-workspace".into(),
+                pane_id: old_pane_id,
+            },
+            crate::server::handoff::HandoffDockOwnership {
+                workspace_id: workspace_id.clone(),
+                pane_id: u32::MAX - 18,
+            },
+            crate::server::handoff::HandoffDockOwnership {
+                workspace_id,
+                pane_id: old_pane_id,
+            },
+        ]);
+
+        assert_eq!(app.state.dock_backing_tab_idx(0), Some(dock_tab));
+        assert!(app.state.is_dock_pane(0, dock_pane));
     }
 
     #[test]

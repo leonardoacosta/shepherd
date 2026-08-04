@@ -1,5 +1,8 @@
-## ADDED Requirements
+# configurable-chrome Specification
 
+## Purpose
+TBD - created by archiving change surface-configurable-chrome. Update Purpose after archive.
+## Requirements
 ### Requirement: Display settings surface configurable chrome
 Shepherd SHALL expose desktop topbar and dock presentation through the existing Settings experience without requiring users to edit TOML for basic enablement and dock placement.
 
@@ -72,6 +75,11 @@ Shepherd SHALL reserve the configured full dock region only when the dock is ena
 - **THEN** Shepherd reserves the configured size on that edge
 - **AND** clamps it to preserve at least one main-content row or column
 - **AND** resizes the dock runtime to the bordered region's inner dimensions during view computation rather than render
+
+#### Scenario: Terminal cannot fit a minimum bordered dock and main body
+- **WHEN** a live dock is enabled but the available edge cannot fit both three dock cells and one main-content cell
+- **THEN** the dock rectangle is empty and the main body remains usable
+- **AND** Shepherd does not resize the dock runtime to a zero-row or zero-column interior
 
 #### Scenario: Disabled dock keeps its process but hides presentation
 - **WHEN** a user disables the dock while its pane is running
@@ -165,6 +173,15 @@ A live desktop dock SHALL be an interactive auxiliary focus target that does not
 - **WHEN** the user clicks an ordinary pane or directly navigates workspace, tab, or pane focus
 - **THEN** Shepherd clears dock focus before routing subsequent input to the main surface
 
+#### Scenario: Dock focus remains client-only
+- **WHEN** one TUI client focuses a dock or an API client focuses an ordinary main identity
+- **THEN** auxiliary dock focus remains isolated to the originating TUI client
+- **AND** dock focus does not emit shared workspace/tab/pane focus events or terminal focus-in/focus-out sequences
+
+#### Scenario: Paste follows auxiliary input focus
+- **WHEN** a user pastes while a live dock has auxiliary focus
+- **THEN** Shepherd sends the paste to that dock runtime rather than the main focused pane
+
 #### Scenario: Invalid dock focus fails closed to the main surface
 - **WHEN** dock focus exists but the dock becomes disabled, nonlive, closed, stale, or belongs to a different active workspace
 - **THEN** Shepherd clears dock focus and sends no bytes to the invalid target
@@ -192,6 +209,11 @@ Shepherd SHALL retain a live dock's backing tab for existing runtime/API identit
 - **WHEN** `tab.focus` targets a live dock backing tab
 - **THEN** Shepherd returns `tab_not_focusable`
 - **AND** leaves the active main tab and auxiliary dock state unchanged
+
+#### Scenario: Backing topology remains an isolated container
+- **WHEN** a pane split, pane move, swap, or layout operation would add, remove, or re-home panes through a managed dock backing tab
+- **THEN** Shepherd rejects the operation before mutation
+- **AND** the backing tab remains a workspace-local single-pane container without losing ordinary panes or processes
 
 #### Scenario: Closing workspace cleans up the dock
 - **WHEN** a workspace containing a live dock is closed
@@ -237,3 +259,4 @@ Shepherd SHALL make disabled-by-default chrome discoverable through executable d
 - **WHEN** the feature is authored before release
 - **THEN** English, Japanese, and Chinese preview configuration pages and `docs/next/CHANGELOG.md` are updated together
 - **AND** stable website docs, root README, root changelog, and `website/latest.json` remain unchanged
+

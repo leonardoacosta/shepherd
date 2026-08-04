@@ -8,6 +8,58 @@ use crate::api::schema::{
 use crate::app::App;
 
 impl App {
+    fn reconcile_stale_dock_panes(&mut self) {
+        let records = self
+            .state
+            .dock_panes
+            .iter()
+            .map(|(workspace_id, record)| (workspace_id.clone(), *record))
+            .collect::<Vec<_>>();
+
+        for (workspace_id, record) in records {
+            let Some(ws_idx) = self
+                .state
+                .workspaces
+                .iter()
+                .position(|workspace| workspace.id == workspace_id)
+            else {
+                self.state.remove_plugin_pane_records([record.pane_id]);
+                continue;
+            };
+            let Some(tab_idx) =
+                self.state.workspaces[ws_idx].find_tab_index_for_pane(record.pane_id)
+            else {
+                self.state.remove_plugin_pane_records([record.pane_id]);
+                continue;
+            };
+            let tab = &self.state.workspaces[ws_idx].tabs[tab_idx];
+            let isolated = tab.panes.len() == 1
+                && tab.root_pane == record.pane_id
+                && tab.layout.focused() == record.pane_id;
+            if !isolated {
+                self.state.remove_plugin_pane_records([record.pane_id]);
+                continue;
+            }
+            if self
+                .state
+                .runtime_for_pane_in_workspace(&self.terminal_runtimes, ws_idx, record.pane_id)
+                .is_some()
+            {
+                continue;
+            }
+
+            let terminal_ids = self.state.terminal_ids_for_tab(ws_idx, tab_idx);
+            let removed = self.state.workspaces[ws_idx].close_tab(tab_idx);
+            self.state.remove_plugin_pane_records([record.pane_id]);
+            if removed {
+                self.state.remove_unattached_terminal_ids(terminal_ids);
+            }
+        }
+
+        self.state.reconcile_dock_panes();
+        self.shutdown_detached_terminal_runtimes();
+    }
+
     pub(super) fn open_plugin_popup_pane(
         &mut self,
         id: String,
@@ -97,6 +149,13 @@ impl App {
                 format!("pane {target_pane_id} not found"),
             );
         };
+        if self.state.is_dock_pane(ws_idx, target_pane) {
+            return encode_error(
+                id,
+                "pane_not_mutable",
+                "dock backing pane topology is protected",
+            );
+        }
         let context = self.plugin_context_for_pane(ws_idx, target_pane, "plugin-pane");
         let extra_env =
             match self.plugin_pane_launch_env(plugin, &pane.id, params.env.clone(), &context) {
@@ -234,6 +293,10 @@ impl App {
         plugin: &InstalledPluginInfo,
         pane: PluginManifestPane,
     ) -> String {
+        if !self.state.dock_enabled {
+            return encode_error(id, "plugin_dock_disabled", "workspace dock is disabled");
+        }
+        self.reconcile_stale_dock_panes();
         let ws_idx = match params.workspace_id.as_deref() {
             Some(workspace_id) => match self.parse_workspace_id(workspace_id) {
                 Some(ws_idx) => ws_idx,
@@ -276,7 +339,16 @@ impl App {
             Err(err) => return encode_error(id, "plugin_pane_open_failed", err.to_string()),
         };
         let pane_id = ws.tabs[tab_idx].root_pane;
-        let _ = self.state.reserve_dock_pane(ws_idx, pane_id, tab_idx);
+        if self.state.reserve_dock_pane(ws_idx, pane_id).is_err() {
+            if let Some(workspace) = self.state.workspaces.get_mut(ws_idx) {
+                let _ = workspace.close_tab(tab_idx);
+            }
+            return encode_error(
+                id,
+                "plugin_dock_occupied",
+                "workspace dock is already occupied",
+            );
+        }
         let new_pane = crate::workspace::NewPane {
             pane_id,
             terminal,

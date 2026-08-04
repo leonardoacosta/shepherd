@@ -48,6 +48,13 @@ impl App {
                 "use either tab_id or workspace_id, not both",
             );
         }
+        if replace_target.is_some_and(|(ws_idx, tab_idx)| self.state.is_dock_tab(ws_idx, tab_idx)) {
+            return encode_error(
+                id,
+                "tab_not_mutable",
+                "dock backing tab topology is protected",
+            );
+        }
 
         let ws_idx = if let Some((ws_idx, _)) = replace_target {
             ws_idx

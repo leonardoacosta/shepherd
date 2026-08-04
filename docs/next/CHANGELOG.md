@@ -4,6 +4,7 @@
 
 ### Added
 - Connections to the Shepherd socket from a process running as a different user are now rejected on Linux and macOS.
+- Added Display settings and disabled-by-default config for a token-driven desktop topbar and an interactive workspace plugin dock, including explicit eligible-pane launch, auxiliary input focus, restore-safe hidden backing tabs, and compatible Unix live-handoff preservation.
 
 ### Changed
 - Agent status indicators now use the same static workspace marks across the sidebar, navigator, and mobile views, eliminating continuous spinner rendering while agents work.

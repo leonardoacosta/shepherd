@@ -45,6 +45,13 @@ impl App {
         let Some((ws_idx, target_pane_id)) = target else {
             return encode_error(id, "pane_not_found", "pane not found");
         };
+        if self.state.is_dock_pane(ws_idx, target_pane_id) {
+            return encode_error(
+                id,
+                "pane_not_mutable",
+                "dock backing pane topology is protected",
+            );
+        }
         let extra_env = match super::env::normalize_launch_env(params.env) {
             Ok(env) => env,
             Err((code, message)) => return encode_error(id, &code, message),
@@ -162,6 +169,13 @@ impl App {
         let Some(_tab_idx) = self.state.workspaces[ws_idx].find_tab_index_for_pane(pane_id) else {
             return pane_not_found(id, &target.pane_id);
         };
+        if self.state.is_dock_pane(ws_idx, pane_id) {
+            return encode_error(
+                id,
+                "pane_not_focusable",
+                "dock backing pane cannot receive main focus",
+            );
+        }
 
         self.state.focus_pane_in_workspace(ws_idx, pane_id);
         self.state.mark_active_tab_seen();
@@ -537,6 +551,16 @@ impl App {
             (ws_idx, tab_idx, source_pane_id, target_pane_id, reason)
         };
 
+        if self.state.is_dock_pane(ws_idx, source_pane_id)
+            || target_pane_id.is_some_and(|pane_id| self.state.is_dock_pane(ws_idx, pane_id))
+        {
+            return encode_error(
+                id,
+                "pane_not_mutable",
+                "dock backing pane topology is protected",
+            );
+        }
+
         let mut changed = false;
         if reason.is_none() {
             if let Some(target_pane_id) = target_pane_id {
@@ -625,6 +649,25 @@ impl App {
         else {
             return encode_error(id, "pane_not_found", "source pane not found");
         };
+        if self.state.is_dock_pane(source_ws_idx, source_pane_id) {
+            return encode_error(
+                id,
+                "pane_not_mutable",
+                "dock backing pane topology is protected",
+            );
+        }
+        if let PaneMoveDestination::Tab { tab_id, .. } = &destination {
+            if self
+                .parse_tab_id(tab_id)
+                .is_some_and(|(ws_idx, tab_idx)| self.state.is_dock_tab(ws_idx, tab_idx))
+            {
+                return encode_error(
+                    id,
+                    "pane_not_mutable",
+                    "dock backing tab topology is protected",
+                );
+            }
+        }
         let previous_pane_id = self
             .public_pane_id(source_ws_idx, source_pane_id)
             .unwrap_or_else(|| pane_id.clone());
@@ -1545,12 +1588,13 @@ impl App {
         }
         let workspace_snapshot = self.workspace_info(ws_idx);
         let terminal_id = self.state.terminal_id_for_pane(ws_idx, pane_id);
-        let should_close_workspace = {
+        let should_close_workspace = self.state.close_pane_would_close_workspace(ws_idx, pane_id);
+        if !should_close_workspace {
             let Some(ws) = self.state.workspaces.get_mut(ws_idx) else {
                 return Err(pane_not_found(id, &target.pane_id));
             };
-            ws.close_pane(pane_id)
-        };
+            let _ = ws.close_pane(pane_id);
+        }
         self.state.remove_plugin_pane_records([pane_id]);
         if should_close_workspace {
             self.state.selected = ws_idx;
@@ -3714,6 +3758,39 @@ mod tests {
 
         let error: ErrorResponse = serde_json::from_str(&response).unwrap();
         assert_eq!(error.error.code, "pane_not_found");
+    }
+
+    #[test]
+    fn api_pane_focus_rejects_dock_without_clearing_auxiliary_focus() {
+        let mut app = app_with_linked_worktree();
+        let dock_tab = app.state.workspaces[0].test_add_tab(Some("dock-backing"));
+        let dock_pane = app.state.workspaces[0].tabs[dock_tab].root_pane;
+        seed_terminal_states(&mut app);
+        app.state
+            .reserve_dock_pane(0, dock_pane)
+            .expect("dock reservation");
+        let workspace_id = app.state.workspaces[0].id.clone();
+        app.state.dock_focus = Some(crate::app::state::DockFocus {
+            workspace_id,
+            pane_id: dock_pane,
+        });
+        let dock_pane_id = app.public_pane_id(0, dock_pane).unwrap();
+
+        let response = app.handle_pane_focus(
+            "req".into(),
+            PaneTarget {
+                pane_id: dock_pane_id,
+            },
+        );
+
+        let error: ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(error.error.code, "pane_not_focusable");
+        assert_eq!(app.state.workspaces[0].active_tab, 0);
+        assert!(app
+            .state
+            .dock_focus
+            .as_ref()
+            .is_some_and(|focus| focus.pane_id == dock_pane));
     }
 
     #[test]

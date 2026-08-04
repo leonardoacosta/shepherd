@@ -28,7 +28,7 @@ use self::dialogs::{
     render_confirm_close_overlay, render_new_linked_worktree_overlay,
     render_open_existing_worktree_overlay, render_remove_worktree_overlay, render_rename_overlay,
 };
-use self::dock::{render_dock, resize_dock};
+use self::dock::{render_dock, resize_dock, resolve_live_dock};
 use self::keybind_help::render_keybind_help_overlay;
 use self::menus::{
     render_context_menu, render_copy_mode_overlay, render_global_launcher_menu,
@@ -54,6 +54,7 @@ pub(crate) use self::scrollbar::{
     pane_scrollbar_rect, release_notes_scrollbar_rect, scrollbar_offset_from_drag_row,
     scrollbar_offset_from_row, scrollbar_thumb_grab_offset, should_show_scrollbar,
 };
+pub(crate) use self::settings::display_size_delta_at;
 use self::settings::render_settings_overlay;
 #[cfg(test)]
 pub(crate) use self::sidebar::workspace_drop_indicator_row;
@@ -66,7 +67,7 @@ pub(crate) use self::tab_surface::{
     compute_tab_surface, render_tab_surface, resize_tab_surface, TabSurfaceLayout,
 };
 use self::tabs::render_tab_bar;
-use self::topbar::render_topbar;
+use self::topbar::{render_topbar, resolved_rows as resolved_topbar_rows};
 pub(crate) use self::{
     dialogs::{
         confirm_close_button_rects, confirm_close_popup_rect, new_linked_worktree_button_rects,
@@ -101,11 +102,12 @@ pub(crate) use self::{
     },
     panes::{apply_pane_chrome, pane_inner_rect, pane_is_scrolled_back},
     tab_surface::{tab_surface_cursor, tab_surface_hyperlinks, TabSurfaceView},
-    tabs::compute_tab_bar_view,
+    tabs::compute_tab_bar_view_for_app,
     widgets::{centered_popup_rect, modal_stack_areas},
 };
 use crate::app::state::ViewLayout;
 use crate::app::{AppState, Mode};
+use crate::layout::PaneInfo;
 use crate::terminal::TerminalRuntimeRegistry;
 
 const COLLAPSED_WIDTH: u16 = 4; // num + space + dot + separator
@@ -183,7 +185,7 @@ fn resize_background_tab_panes_for_desktop(
     cell_size: crate::kitty_graphics::HostCellSize,
 ) {
     for (ws_idx, ws) in app.workspaces.iter().enumerate() {
-        let (_, terminal_area) = desktop_tab_bar_and_terminal_area(app, ws, main_area);
+        let (_, terminal_area) = desktop_tab_bar_and_terminal_area(app, ws_idx, main_area);
         for (tab_idx, tab) in ws.tabs.iter().enumerate() {
             if app.active == Some(ws_idx) && tab_idx == ws.active_tab_index() {
                 continue;
@@ -195,10 +197,11 @@ fn resize_background_tab_panes_for_desktop(
 
 fn desktop_tab_bar_and_terminal_area(
     app: &AppState,
-    ws: &crate::workspace::Workspace,
+    ws_idx: usize,
     main_area: Rect,
 ) -> (Rect, Rect) {
-    let hide_single_tab_bar = app.hide_tab_bar_when_single_tab && ws.tabs.len() == 1;
+    let hide_single_tab_bar =
+        app.hide_tab_bar_when_single_tab && app.visible_tab_indices(ws_idx).len() == 1;
     if !hide_single_tab_bar && main_area.height > 1 {
         let [tab_bar_rect, terminal_area] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(main_area);
@@ -230,8 +233,9 @@ fn compute_view_internal(
             .clamp(app.sidebar_min_width, app.sidebar_max_width)
     };
 
-    let [topbar_area, body_area] = if app.topbar_enabled && area.height > 1 {
-        Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area)
+    let topbar_height = (resolved_topbar_rows(app).len() as u16).min(area.height.saturating_sub(1));
+    let [topbar_area, body_area] = if topbar_height > 0 {
+        Layout::vertical([Constraint::Length(topbar_height), Constraint::Min(1)]).areas(area)
     } else {
         [Rect::default(), area]
     };
@@ -239,16 +243,28 @@ fn compute_view_internal(
     let [sidebar_area, main_area] =
         Layout::horizontal([Constraint::Length(sidebar_w), Constraint::Min(1)]).areas(body_area);
 
-    let (main_area, dock_area) = if app.dock_enabled {
+    let has_live_dock = resolve_live_dock(app, terminal_runtimes).is_some();
+    app.clear_invalid_dock_focus(terminal_runtimes);
+    let (main_area, dock_area) = if has_live_dock {
         match app.dock_side {
-            crate::config::DockSide::Bottom if main_area.height > 1 => {
-                let size = app.dock_size.min(main_area.height.saturating_sub(1));
+            crate::config::DockSide::Bottom
+                if main_area.height >= crate::config::MIN_DOCK_SIZE.saturating_add(1) =>
+            {
+                let size = app
+                    .dock_size
+                    .max(crate::config::MIN_DOCK_SIZE)
+                    .min(main_area.height.saturating_sub(1));
                 let [main, dock] = Layout::vertical([Constraint::Min(1), Constraint::Length(size)])
                     .areas(main_area);
                 (main, dock)
             }
-            crate::config::DockSide::Right if main_area.width > 1 => {
-                let size = app.dock_size.min(main_area.width.saturating_sub(1));
+            crate::config::DockSide::Right
+                if main_area.width >= crate::config::MIN_DOCK_SIZE.saturating_add(1) =>
+            {
+                let size = app
+                    .dock_size
+                    .max(crate::config::MIN_DOCK_SIZE)
+                    .min(main_area.width.saturating_sub(1));
                 let [main, dock] =
                     Layout::horizontal([Constraint::Min(1), Constraint::Length(size)])
                         .areas(main_area);
@@ -262,8 +278,11 @@ fn compute_view_internal(
 
     let (tab_bar_rect, terminal_area) = app
         .active
-        .and_then(|i| app.workspaces.get(i))
-        .map(|ws| desktop_tab_bar_and_terminal_area(app, ws, main_area))
+        .and_then(|ws_idx| {
+            app.workspaces
+                .get(ws_idx)
+                .map(|_| desktop_tab_bar_and_terminal_area(app, ws_idx, main_area))
+        })
         .unwrap_or((Rect::default(), main_area));
 
     let agent_panel_entries = if !app.sidebar_collapsed {
@@ -290,10 +309,10 @@ fn compute_view_internal(
 
     let tab_bar_view = app
         .active
-        .and_then(|ws_idx| app.workspaces.get(ws_idx))
-        .map(|ws| {
-            compute_tab_bar_view(
-                ws,
+        .map(|ws_idx| {
+            self::tabs::compute_tab_bar_view_for_app(
+                app,
+                ws_idx,
                 tab_bar_rect,
                 app.tab_scroll,
                 app.tab_scroll_follow_active,
@@ -340,6 +359,19 @@ fn compute_view_internal(
         tab_bar_rect,
         topbar_rect: topbar_area,
         dock_rect: dock_area,
+        dock_pane_info: resolve_live_dock(app, terminal_runtimes).and_then(|dock| {
+            (!dock_area.is_empty()).then(|| PaneInfo {
+                id: dock.pane_id,
+                rect: dock_area,
+                inner_rect: self::dock::dock_inner_rect(dock_area),
+                scrollbar_rect: None,
+                borders: ratatui::widgets::Borders::ALL,
+                is_focused: app.dock_focus.as_ref().is_some_and(|focus| {
+                    focus.workspace_id == app.workspaces[dock.ws_idx].id
+                        && focus.pane_id == dock.pane_id
+                }),
+            })
+        }),
         tab_hit_areas: tab_bar_view.tab_hit_areas,
         tab_scroll_left_hit_area: tab_bar_view.scroll_left_hit_area,
         tab_scroll_right_hit_area: tab_bar_view.scroll_right_hit_area,
@@ -361,6 +393,7 @@ fn compute_mobile_view(
     resize_panes: bool,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) {
+    app.dock_focus = None;
     let header_h = area.height.min(2);
     let (header_rect, terminal_area) = if area.height > header_h {
         let [header_rect, terminal_area] =
@@ -406,6 +439,7 @@ fn compute_mobile_view(
         tab_bar_rect: Rect::default(),
         topbar_rect: Rect::default(),
         dock_rect: Rect::default(),
+        dock_pane_info: None,
         tab_hit_areas: Vec::new(),
         tab_scroll_left_hit_area: Rect::default(),
         tab_scroll_right_hit_area: Rect::default(),
@@ -1027,16 +1061,30 @@ mod tests {
     }
 
     #[test]
-    fn desktop_topbar_and_bottom_dock_reserve_outer_geometry() {
+    fn dock_enabled_without_live_runtime_reserves_no_geometry() {
         let mut app = AppState::test_new();
         app.topbar_enabled = true;
         app.dock_enabled = true;
         app.dock_side = crate::config::DockSide::Bottom;
         app.dock_size = 6;
         compute_view(&mut app, Rect::new(0, 0, 100, 30));
-        assert_eq!(app.view.topbar_rect, Rect::new(0, 0, 100, 1));
-        assert_eq!(app.view.dock_rect, Rect::new(26, 24, 74, 6));
-        assert_eq!(app.view.terminal_area, Rect::new(26, 1, 74, 23));
+        assert_eq!(app.view.topbar_rect, Rect::default());
+        assert_eq!(app.view.dock_rect, Rect::default());
+        assert_eq!(app.view.terminal_area, Rect::new(26, 0, 74, 30));
+    }
+
+    #[test]
+    fn topbar_clips_resolved_rows_to_preserve_one_desktop_body_row() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("topbar")];
+        app.active = Some(0);
+        app.topbar_enabled = true;
+        app.topbar_rows = vec![vec![crate::config::AgentSidebarToken::Workspace]; 4];
+
+        compute_view(&mut app, Rect::new(0, 0, 100, 2));
+
+        assert_eq!(app.view.topbar_rect.height, 1);
+        assert_eq!(app.view.terminal_area.height, 1);
     }
 
     #[test]

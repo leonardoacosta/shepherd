@@ -249,6 +249,7 @@ fn first_pane_id_in_layout(layout: &LayoutSnapshot) -> Option<u32> {
 }
 
 /// Capture the current app state into a serializable snapshot.
+#[cfg(any(unix, test))]
 pub fn capture(
     workspaces: &[Workspace],
     terminals: &std::collections::HashMap<
@@ -262,11 +263,72 @@ pub fn capture(
     sidebar_section_split: f32,
     collapsed_space_keys: std::collections::HashSet<String>,
 ) -> SessionSnapshot {
+    capture_with_dock_exclusions(
+        workspaces,
+        terminals,
+        terminal_runtimes,
+        active,
+        selected,
+        sidebar_width,
+        sidebar_section_split,
+        collapsed_space_keys,
+        &HashMap::new(),
+    )
+}
+
+pub(crate) fn capture_for_disk(
+    state: &crate::app::AppState,
+    terminal_runtimes: &TerminalRuntimeRegistry,
+) -> SessionSnapshot {
+    let exclusions = state
+        .workspaces
+        .iter()
+        .enumerate()
+        .filter_map(|(ws_idx, workspace)| {
+            let tab_idx = state.dock_backing_tab_idx(ws_idx)?;
+            Some((workspace.id.clone(), workspace.tabs[tab_idx].root_pane))
+        })
+        .collect::<HashMap<_, _>>();
+    capture_with_dock_exclusions(
+        &state.workspaces,
+        &state.terminals,
+        terminal_runtimes,
+        state.active,
+        state.selected,
+        state.sidebar_width,
+        state.sidebar_section_split,
+        state.collapsed_space_keys.clone(),
+        &exclusions,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn capture_with_dock_exclusions(
+    workspaces: &[Workspace],
+    terminals: &std::collections::HashMap<
+        crate::terminal::TerminalId,
+        crate::terminal::TerminalState,
+    >,
+    terminal_runtimes: &TerminalRuntimeRegistry,
+    active: Option<usize>,
+    selected: usize,
+    sidebar_width: u16,
+    sidebar_section_split: f32,
+    collapsed_space_keys: std::collections::HashSet<String>,
+    exclusions: &HashMap<String, crate::layout::PaneId>,
+) -> SessionSnapshot {
     SessionSnapshot {
         version: SNAPSHOT_VERSION,
         workspaces: workspaces
             .iter()
-            .map(|workspace| capture_workspace(workspace, terminals, terminal_runtimes))
+            .map(|workspace| {
+                capture_workspace(
+                    workspace,
+                    terminals,
+                    terminal_runtimes,
+                    exclusions.get(&workspace.id).copied(),
+                )
+            })
             .collect(),
         active,
         selected,
@@ -283,7 +345,18 @@ fn capture_workspace(
         crate::terminal::TerminalState,
     >,
     terminal_runtimes: &TerminalRuntimeRegistry,
+    excluded_dock_pane: Option<crate::layout::PaneId>,
 ) -> WorkspaceSnapshot {
+    let excluded_tab_idx = excluded_dock_pane
+        .and_then(|pane_id| ws.find_tab_index_for_pane(pane_id))
+        .filter(|tab_idx| {
+            ws.tabs.get(*tab_idx).is_some_and(|tab| {
+                tab.panes.len() == 1 && Some(tab.root_pane) == excluded_dock_pane
+            })
+        });
+    let visible_tab_indices = (0..ws.tabs.len())
+        .filter(|tab_idx| Some(*tab_idx) != excluded_tab_idx)
+        .collect::<Vec<_>>();
     WorkspaceSnapshot {
         id: Some(ws.id.clone()),
         custom_name: ws.custom_name.clone(),
@@ -294,17 +367,23 @@ fn capture_workspace(
         public_pane_numbers: ws
             .public_pane_numbers
             .iter()
+            .filter(|(pane_id, _)| Some(**pane_id) != excluded_dock_pane)
             .map(|(pane_id, number)| (pane_id.raw(), *number))
             .collect(),
         next_public_pane_number: ws.next_public_pane_number,
-        public_tab_numbers: ws.tabs.iter().map(|tab| tab.number).collect(),
-        next_public_tab_number: ws.next_public_tab_number,
-        tabs: ws
-            .tabs
+        public_tab_numbers: visible_tab_indices
             .iter()
-            .map(|tab| capture_tab(tab, terminals, terminal_runtimes))
+            .map(|tab_idx| ws.tabs[*tab_idx].number)
             .collect(),
-        active_tab: ws.active_tab,
+        next_public_tab_number: ws.next_public_tab_number,
+        tabs: visible_tab_indices
+            .iter()
+            .map(|tab_idx| capture_tab(&ws.tabs[*tab_idx], terminals, terminal_runtimes))
+            .collect(),
+        active_tab: visible_tab_indices
+            .iter()
+            .position(|tab_idx| *tab_idx == ws.active_tab)
+            .unwrap_or(0),
     }
 }
 
@@ -382,9 +461,26 @@ fn capture_tab(
 }
 
 /// Capture pane screen history separately from the structural session snapshot.
-pub fn capture_history(
+pub(crate) fn capture_history_for_disk(
+    state: &crate::app::AppState,
+    terminal_runtimes: &TerminalRuntimeRegistry,
+) -> SessionHistorySnapshot {
+    let exclusions = state
+        .workspaces
+        .iter()
+        .enumerate()
+        .filter_map(|(ws_idx, workspace)| {
+            let tab_idx = state.dock_backing_tab_idx(ws_idx)?;
+            Some((workspace.id.clone(), workspace.tabs[tab_idx].root_pane))
+        })
+        .collect::<HashMap<_, _>>();
+    capture_history_with_dock_exclusions(&state.workspaces, terminal_runtimes, &exclusions)
+}
+
+fn capture_history_with_dock_exclusions(
     workspaces: &[Workspace],
     terminal_runtimes: &TerminalRuntimeRegistry,
+    exclusions: &HashMap<String, crate::layout::PaneId>,
 ) -> SessionHistorySnapshot {
     SessionHistorySnapshot {
         version: SNAPSHOT_VERSION,
@@ -394,6 +490,11 @@ pub fn capture_history(
                 tabs: workspace
                     .tabs
                     .iter()
+                    .filter(|tab| {
+                        exclusions
+                            .get(&workspace.id)
+                            .is_none_or(|pane_id| !tab.panes.contains_key(pane_id))
+                    })
                     .map(|tab| TabHistorySnapshot {
                         panes: capture_tab_history(tab, terminal_runtimes),
                     })
@@ -525,30 +626,48 @@ mod tests {
 
     fn capture_from_state(state: &AppState) -> SessionSnapshot {
         let terminal_runtimes = TerminalRuntimeRegistry::new();
-        capture_from_state_with_runtimes(state, &terminal_runtimes)
+        capture_for_disk(state, &terminal_runtimes)
     }
 
     fn capture_from_state_with_runtimes(
         state: &AppState,
         terminal_runtimes: &TerminalRuntimeRegistry,
     ) -> SessionSnapshot {
-        capture(
-            &state.workspaces,
-            &state.terminals,
-            terminal_runtimes,
-            state.active,
-            state.selected,
-            state.sidebar_width,
-            state.sidebar_section_split,
-            state.collapsed_space_keys.clone(),
-        )
+        capture_for_disk(state, terminal_runtimes)
     }
 
     fn capture_history_from_state_with_runtimes(
         state: &AppState,
         terminal_runtimes: &TerminalRuntimeRegistry,
     ) -> SessionHistorySnapshot {
-        capture_history(&state.workspaces, terminal_runtimes)
+        capture_history_for_disk(state, terminal_runtimes)
+    }
+
+    #[test]
+    fn dock_snapshot_omits_backing_tab_and_public_number_entries() {
+        let mut state = state_with_workspaces(&["snapshot-dock"]);
+        let dock_tab = state.workspaces[0].test_add_tab(Some("dock-backing"));
+        let dock_pane = state.workspaces[0].tabs[dock_tab].root_pane;
+        let dock_tab_number = state.workspaces[0].tabs[dock_tab].number;
+        let dock_pane_number = state.workspaces[0]
+            .public_pane_number(dock_pane)
+            .expect("dock pane number");
+        state.ensure_test_terminals();
+        state
+            .reserve_dock_pane(0, dock_pane)
+            .expect("dock reservation");
+
+        let snapshot = capture_from_state(&state);
+        let workspace = &snapshot.workspaces[0];
+
+        assert_eq!(workspace.tabs.len(), 1);
+        assert!(!workspace.public_tab_numbers.contains(&dock_tab_number));
+        assert!(!workspace
+            .public_pane_numbers
+            .values()
+            .any(|number| *number == dock_pane_number));
+        assert_eq!(workspace.next_public_tab_number, 3);
+        assert_eq!(workspace.next_public_pane_number, 3);
     }
 
     fn root_split_ratio(tab: &TabSnapshot) -> Option<f32> {

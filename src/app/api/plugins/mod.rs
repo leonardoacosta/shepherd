@@ -36,7 +36,7 @@ impl App {
             .collect();
     }
 
-    fn refresh_installed_plugins(&mut self) -> std::io::Result<()> {
+    pub(crate) fn refresh_installed_plugins(&mut self) -> std::io::Result<()> {
         if self.no_session {
             return Ok(());
         }
@@ -340,7 +340,7 @@ impl App {
         encode_success(id, ResponseResult::PluginLogList { logs })
     }
 
-    pub(super) fn handle_plugin_pane_open(
+    pub(crate) fn handle_plugin_pane_open(
         &mut self,
         id: String,
         params: PluginPaneOpenParams,
@@ -463,6 +463,13 @@ impl App {
         };
         if !self.state.plugin_panes.contains_key(&pane_id) {
             return encode_error(id, "plugin_pane_not_found", "plugin pane not found");
+        }
+        if self.state.is_dock_pane(ws_idx, pane_id) {
+            return encode_error(
+                id,
+                "pane_not_focusable",
+                "dock backing pane cannot receive main focus",
+            );
         }
         self.state.focus_pane_in_workspace(ws_idx, pane_id);
         self.state.settle_terminal_mode_after_focus();
@@ -708,6 +715,49 @@ fn manifest_actions(
                 .iter()
                 .map(|action| manifest_action_info(&plugin.plugin_id, &plugin.platforms, action))
         })
+}
+
+pub(crate) fn eligible_dock_pane_candidates(
+    plugins: &crate::app::state::InstalledPluginRegistry,
+) -> Vec<crate::app::state::DockPaneCandidate> {
+    let mut candidates = plugins
+        .values()
+        .filter(|plugin| plugin.enabled && plugin_manifest_available(plugin))
+        .flat_map(|plugin| {
+            plugin
+                .panes
+                .iter()
+                .filter(|pane| {
+                    pane.placement == PluginPanePlacement::Dock
+                        && ensure_platform_supported(
+                            effective_platforms(&pane.platforms, &plugin.platforms),
+                            "plugin pane",
+                        )
+                        .is_ok()
+                })
+                .map(|pane| crate::app::state::DockPaneCandidate {
+                    plugin_id: plugin.plugin_id.clone(),
+                    entrypoint: pane.id.clone(),
+                    plugin_name: plugin.name.clone(),
+                    title: pane.title.clone(),
+                })
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|a, b| {
+        (
+            a.plugin_name.to_lowercase(),
+            a.title.to_lowercase(),
+            &a.plugin_id,
+            &a.entrypoint,
+        )
+            .cmp(&(
+                b.plugin_name.to_lowercase(),
+                b.title.to_lowercase(),
+                &b.plugin_id,
+                &b.entrypoint,
+            ))
+    });
+    candidates
 }
 
 #[cfg(test)]
@@ -1288,6 +1338,86 @@ platforms = ["linux", "macos"]
         assert_eq!(plugin.events.len(), 1);
         assert_eq!(plugin.panes.len(), 1);
         assert!(plugin.warnings.is_empty());
+    }
+
+    #[test]
+    fn dock_candidate_filter_uses_manifest_eligibility_and_stable_sorting() {
+        let base = load_plugin_manifest("tests/fixtures/plugin-smoke", true)
+            .expect("smoke fixture should load");
+        let mut zulu = base.clone();
+        zulu.plugin_id = "example.zulu".into();
+        zulu.name = "Zulu".into();
+        zulu.panes[0].placement = PluginPanePlacement::Dock;
+        zulu.panes[0].title = "Second".into();
+
+        let mut alpha = zulu.clone();
+        alpha.plugin_id = "example.alpha".into();
+        alpha.name = "Alpha".into();
+        alpha.panes[0].title = "First".into();
+
+        let mut disabled = alpha.clone();
+        disabled.plugin_id = "example.disabled".into();
+        disabled.enabled = false;
+
+        let mut overlay = alpha.clone();
+        overlay.plugin_id = "example.overlay".into();
+        overlay.panes[0].placement = PluginPanePlacement::Overlay;
+
+        let mut unsupported = alpha.clone();
+        unsupported.plugin_id = "example.unsupported".into();
+        unsupported.panes[0].platforms = Some(vec![if cfg!(target_os = "linux") {
+            crate::api::schema::PluginPlatform::Macos
+        } else {
+            crate::api::schema::PluginPlatform::Linux
+        }]);
+
+        let registry = [zulu, disabled, overlay, unsupported, alpha]
+            .into_iter()
+            .map(|plugin| (plugin.plugin_id.clone(), plugin))
+            .collect();
+        let candidates = eligible_dock_pane_candidates(&registry);
+
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.plugin_id.as_str())
+                .collect::<Vec<_>>(),
+            ["example.alpha", "example.zulu"]
+        );
+    }
+
+    #[test]
+    fn plugin_pane_focus_rejects_dock_backing_identity() {
+        let mut app = test_app();
+        let mut workspace = crate::workspace::Workspace::test_new("plugin-dock-focus");
+        let dock_tab = workspace.test_add_tab(Some("dock-backing"));
+        let dock_pane = workspace.tabs[dock_tab].root_pane;
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+        app.state
+            .reserve_dock_pane(0, dock_pane)
+            .expect("dock reservation");
+        app.state.plugin_panes.insert(
+            dock_pane,
+            crate::app::state::PluginPaneRecord {
+                plugin_id: "example.dock".into(),
+                entrypoint: "board".into(),
+            },
+        );
+        let dock_pane_id = app.public_pane_id(0, dock_pane).unwrap();
+
+        let response = app.handle_plugin_pane_focus(
+            "req".into(),
+            PluginPaneFocusParams {
+                pane_id: dock_pane_id,
+            },
+        );
+
+        let error: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(error.error.code, "pane_not_focusable");
+        assert_eq!(app.state.workspaces[0].active_tab, 0);
     }
 
     #[test]

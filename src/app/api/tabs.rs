@@ -131,6 +131,13 @@ impl App {
         let Some((ws_idx, tab_idx)) = self.parse_tab_id(&target.tab_id) else {
             return tab_not_found(id, &target.tab_id);
         };
+        if self.state.is_dock_tab(ws_idx, tab_idx) {
+            return encode_error(
+                id,
+                "tab_not_focusable",
+                "dock backing tab cannot receive main focus",
+            );
+        }
         self.state.switch_workspace_tab(ws_idx, tab_idx);
         let tab = self.tab_info(ws_idx, tab_idx).unwrap();
 
@@ -233,7 +240,7 @@ impl App {
         let Some(ws) = self.state.workspaces.get(ws_idx) else {
             return tab_not_found(id, &target.tab_id);
         };
-        let closes_workspace = ws.tabs.len() <= 1;
+        let closes_workspace = self.state.close_tab_would_close_workspace(ws_idx, tab_idx);
         let terminal_ids = self.state.terminal_ids_for_tab(ws_idx, tab_idx);
         let pane_ids = ws
             .tabs
@@ -376,6 +383,71 @@ mod tests {
             } if closed_workspace_id == &workspace_id
                 && workspace.workspace_id == workspace_id
         ));
+    }
+
+    #[test]
+    fn api_tab_close_last_visible_tab_closes_workspace_with_hidden_dock() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub.clone());
+        let mut workspace = Workspace::test_new("tabs-with-dock");
+        let dock_tab = workspace.test_add_tab(Some("dock-backing"));
+        let dock_pane = workspace.tabs[dock_tab].root_pane;
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state
+            .reserve_dock_pane(0, dock_pane)
+            .expect("dock reservation");
+        let visible_tab_id = app.public_tab_id(0, 0).unwrap();
+
+        let response = app.handle_tab_close(
+            "req".into(),
+            TabTarget {
+                tab_id: visible_tab_id,
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(success.result, ResponseResult::Ok {});
+        assert!(app.state.workspaces.is_empty());
+        assert!(app.state.dock_panes.is_empty());
+        assert_eq!(
+            event_hub
+                .events_after(0)
+                .iter()
+                .map(|(_, event)| event.event)
+                .collect::<Vec<_>>(),
+            [EventKind::TabClosed, EventKind::WorkspaceClosed]
+        );
+    }
+
+    #[test]
+    fn api_tab_focus_rejects_hidden_dock_backing_tab() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut workspace = Workspace::test_new("tabs-focus-dock");
+        let dock_tab = workspace.test_add_tab(Some("dock-backing"));
+        let dock_pane = workspace.tabs[dock_tab].root_pane;
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state
+            .reserve_dock_pane(0, dock_pane)
+            .expect("dock reservation");
+        let dock_tab_id = app.public_tab_id(0, dock_tab).unwrap();
+
+        let response = app.handle_tab_focus(
+            "req".into(),
+            TabTarget {
+                tab_id: dock_tab_id,
+            },
+        );
+
+        let error: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(error.error.code, "tab_not_focusable");
+        assert_eq!(app.state.workspaces[0].active_tab, 0);
     }
 
     #[test]

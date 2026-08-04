@@ -55,7 +55,7 @@ Introduce pure helpers that resolve the active workspace's dock record, backing 
 
 New dock opens while disabled return a stable `plugin_dock_disabled` error. Disabling an already-running dock only hides it and clears client dock focus; it does not kill the process. Re-enabling reveals the same live runtime. Pane exit, plugin record removal, workspace removal, or runtime loss clears effective occupancy and focus.
 
-`DockConfig.size` accepts values of at least three cells, which leaves one inner row/column inside the existing border. Viewport geometry continues to clamp larger values while preserving one main-content row/column. The existing mutation phase resizes the dock terminal to that inner rectangle whenever the resolved geometry changes; render only consumes the computed rectangles and runtime snapshot.
+`DockConfig.size` accepts values of at least three cells, which leaves one inner row/column inside the existing border. Viewport geometry continues to clamp larger values while preserving one main-content row/column. If the available edge cannot fit both the minimum bordered dock and one main-content cell, the dock rectangle remains empty and the runtime is not resized until it fits. The existing mutation phase resizes the dock terminal to that inner rectangle whenever the resolved geometry changes; render only consumes the computed rectangles and runtime snapshot.
 
 Alternatives rejected:
 
@@ -65,11 +65,11 @@ Alternatives rejected:
 
 ### 3. Add client-only auxiliary dock focus and input routing
 
-Add explicit dock-focus state to the TUI/client presentation state. It is valid only for the current desktop workspace while the dock is enabled and live. It does not change `Workspace.active_tab` or the main tab's focused pane.
+Add explicit dock-focus state to `ClientViewState` and the existing per-client projection plumbing. It is valid only for the current desktop workspace while the dock is enabled and live. It does not change `Workspace.active_tab` or the main tab's focused pane.
 
-`compute_view()` publishes a dock pane hit target/inner rectangle separately from ordinary `view.pane_infos`. Mouse-down in that target focuses the dock; mouse/key forwarding uses the dock's backing pane and runtime with coordinates translated into its inner rectangle. Existing prefix/global shortcuts remain intercepted before terminal bytes are sent. Key press/release ownership continues to use `TerminalInputTarget`, so a key pressed in the dock is released to the same still-live terminal even if presentation focus changes or the dock is hidden. Runtime loss drops the release because no valid press owner remains; invalid dock focus never redirects it to another pane.
+`compute_view()` publishes a dock pane hit target/inner rectangle separately from ordinary `view.pane_infos`. Mouse-down in that target focuses the dock; mouse/key/paste forwarding uses the dock's backing pane and runtime with coordinates translated into its inner rectangle. Existing prefix/global shortcuts remain intercepted before terminal bytes are sent. Key press/release ownership continues to use `TerminalInputTarget`, so a key pressed in the dock is released to the same still-live terminal even if presentation focus changes or the dock is hidden. Runtime loss drops the release because no valid press owner remains; invalid dock focus never redirects it to another pane. Host mouse-capture policy includes a live dock runtime that requests mouse reporting so the first dock interaction is not lost.
 
-Mouse-down on an ordinary main pane, direct workspace/tab/pane navigation, disabling the dock, closing the dock, runtime loss, and leaving the active workspace clear dock focus. The dock border uses the existing focused-pane accent language so focus is visible. The topbar intentionally continues to describe the active main pane; auxiliary dock focus does not replace agent context.
+Mouse-down on an ordinary main pane, direct TUI workspace/tab/pane navigation, disabling the dock, closing the dock, runtime loss, and leaving the active workspace clear dock focus. Generic API focus of ordinary main identities does not mutate per-client auxiliary focus. The dock border uses the existing focused-pane accent language so focus is visible. The topbar intentionally continues to describe the active main pane; auxiliary dock focus does not replace agent context. Terminal focus-in/focus-out signaling and shared focus events remain derived from the main pane; auxiliary dock input focus emits neither because the terminal runtime is shared across clients.
 
 Shared `tab.focus`, `pane.focus`, and `plugin.pane.focus` requests that target the managed backing identity return `tab_not_focusable` or `pane_not_focusable` and leave the active main tab unchanged. Auxiliary focus belongs to the TUI client, so a server API request does not mutate it. Other pane/tab focus behavior is unchanged.
 
@@ -81,7 +81,7 @@ Alternatives rejected:
 
 ### 4. Treat the dock tab as a TUI-hidden, non-restored backing container
 
-Keep the backing tab in the current workspace model so existing pane IDs, lifecycle cleanup, events, and neutral APIs remain valid. Centralize `visible_tab_indices(ws_idx)` in `AppState`, excluding the active workspace's dock backing index. Desktop tab chrome, wheel cycling, key/index navigation, navigator rows, and mobile tab lists consume this helper. Visible fallback labels/ordinals derive from the filtered order so no ghost tab or numbering gap appears in TUI chrome.
+Keep the backing tab in the current workspace model so existing pane IDs, lifecycle cleanup, events, and neutral APIs remain valid. A managed backing tab is a workspace-local single-pane container whose sole pane is the recorded pane ID. Pane-level topology changes that would split, move, swap, or apply another layout to that pane/tab are rejected before mutation; whole-tab rename/move/close remains supported and ownership is resolved from the pane ID afterward. Centralize `visible_tab_indices(ws_idx)` in `AppState`, excluding the active workspace's dock backing index. Desktop tab chrome, wheel cycling, key/index navigation, navigator rows, and mobile tab lists consume this helper. Visible fallback labels/ordinals derive from the filtered order so no ghost tab or numbering gap appears in TUI chrome.
 
 Disk snapshot and history capture receive the per-workspace dock backing identities and omit those tabs, their pane-number entries, and their tab-number entries. `next_public_*_number` values remain monotonic; no existing identity is renumbered. Because dock launch requires an explicit user action, disk restore does not silently restart plugin code.
 
@@ -144,3 +144,12 @@ No stored configuration migration is required. Existing valid `ui.topbar` rows r
 ## Open Questions
 
 None. Automatic metadata-producer lifecycle and API-level hiding of dock backing tabs are explicitly separate future features.
+
+## Apply baseline and roundtable record
+
+- Refreshed 2026-08-03 at `4d8e5194a53ba404113561b592ce29efaa632d8e`; the task worktree was clean, the stamped base `9bd33861` remained reachable, `origin/master` had no commits absent from the task branch, and no active OpenSpec change overlapped this change's implementation paths.
+- Geometry characterization: `topbar_resolved_rows_drive_geometry_and_render_without_render_mutation`, `topbar_clips_resolved_rows_to_preserve_one_desktop_body_row`, `dock_enabled_without_live_runtime_reserves_no_geometry`, `dock_hides_when_terminal_cannot_fit_minimum_bordered_dock_and_body`, and `dock_resolver_tracks_pane_after_preceding_tab_close_insert_and_reorder`.
+- Identity/persistence characterization: adversarial visible-tab projection with both invariant helpers, disk structural/history capture in every dock position, handoff pane-ID remapping plus invalid optional metadata, protected backing topology, and cleanup through tab/pane/plugin/workspace/runtime removal.
+- Input characterization: dock press/repeat/release ownership, paste routing, first-click mouse capture and inner-coordinate routing, popup precedence, TUI-only focus clearing, API nonfocusable rejection, and per-client projection freeze tests.
+- Settings/config characterization: minimum-size parse/live-reload rollback, one shared Display row model for render/key/mouse, comment/sibling-preserving writes, deterministic platform-eligible candidate ordering, explicit single launch, default-config parsing, locale parity, and Windows compile exposure.
+- Roundtable outcome: zero unresolved blockers after adopting the minimum-fit, single-pane topology, per-client focus, paste/mouse-capture, shared-focus-event, and separate disk/handoff policies above.

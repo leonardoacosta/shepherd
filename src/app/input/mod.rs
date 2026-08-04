@@ -63,7 +63,6 @@ use self::{
         modal_action_from_key, ModalAction, ONBOARDING_WELCOME_ACTIONS, RELEASE_NOTES_ACTIONS,
     },
     mouse::MouseAction,
-    settings::SettingsAction,
 };
 use super::state::{AppState, Mode};
 use super::App;
@@ -136,10 +135,22 @@ impl App {
         }
 
         if let Some(ws_idx) = self.state.active {
-            if let Some(rt) = self
+            self.state.clear_invalid_dock_focus(&self.terminal_runtimes);
+            let rt = self
                 .state
-                .focused_runtime_in_workspace(&self.terminal_runtimes, ws_idx)
-            {
+                .focused_dock_pane(&self.terminal_runtimes)
+                .and_then(|(dock_ws_idx, pane_id)| {
+                    self.state.runtime_for_pane_in_workspace(
+                        &self.terminal_runtimes,
+                        dock_ws_idx,
+                        pane_id,
+                    )
+                })
+                .or_else(|| {
+                    self.state
+                        .focused_runtime_in_workspace(&self.terminal_runtimes, ws_idx)
+                });
+            if let Some(rt) = rt {
                 let _ = rt.send_paste(text).await;
             }
         }
@@ -335,25 +346,7 @@ impl App {
                     MouseAction::NewWorkspace => {
                         self.begin_tui_workspace_create("tui.mouse.workspace.create")
                     }
-                    MouseAction::Settings(action) => match action {
-                        SettingsAction::SaveTheme(name) => self.save_theme(&name),
-                        SettingsAction::SaveSound(enabled) => self.save_sound(enabled),
-                        SettingsAction::SaveToastDelivery(delivery) => {
-                            self.save_toast_delivery(delivery)
-                        }
-                        SettingsAction::SaveAgentBorderLabels(enabled) => {
-                            self.save_agent_border_labels(enabled)
-                        }
-                        SettingsAction::SavePaneHistory(enabled) => {
-                            self.save_pane_history_persistence(enabled)
-                        }
-                        SettingsAction::SaveSwitchAsciiInputSourceInPrefix(enabled) => {
-                            self.save_switch_ascii_input_source_in_prefix(enabled)
-                        }
-                        SettingsAction::InstallRecommendedIntegrations => {
-                            self.install_recommended_integrations()
-                        }
-                    },
+                    MouseAction::Settings(action) => self.apply_settings_action(action),
                     MouseAction::FocusWorkspace { ws_idx } => {
                         self.focus_workspace_idx_via_api(ws_idx)
                     }
@@ -396,11 +389,7 @@ impl App {
                 self.selection_highlight_clear_deadline = None;
             }
         }
-        if previous_settings_section != crate::app::state::SettingsSection::Integrations
-            && self.state.settings.section == crate::app::state::SettingsSection::Integrations
-        {
-            self.refresh_integration_recommendations();
-        }
+        self.after_settings_section_change(previous_settings_section);
         if self.state.agent_panel_sort != previous_agent_panel_sort {
             self.save_agent_panel_sort(self.state.agent_panel_sort);
         }

@@ -5,13 +5,13 @@ use crate::config::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ResolvedToken {
+pub(in crate::ui) struct ResolvedToken {
     pub kind: ResolvedTokenKind,
     pub style: SidebarTokenStyle,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum ResolvedTokenKind {
+pub(in crate::ui) enum ResolvedTokenKind {
     StateIcon,
     StateText(String),
     Workspace(String),
@@ -40,9 +40,15 @@ pub(super) fn agent_rows(
     entry: &AgentPanelEntry,
     state_text: &str,
 ) -> Vec<Vec<ResolvedToken>> {
-    config
-        .rows_for_agent(entry.agent)
-        .iter()
+    agent_rows_from(config.rows_for_agent(entry.agent), entry, state_text)
+}
+
+pub(in crate::ui) fn agent_rows_from(
+    rows: &[Vec<AgentSidebarToken>],
+    entry: &AgentPanelEntry,
+    state_text: &str,
+) -> Vec<Vec<ResolvedToken>> {
+    rows.iter()
         .filter_map(|row| {
             let resolved = row
                 .iter()

@@ -35,6 +35,13 @@ pub(crate) const HANDOFF_TOKEN_ENV_VAR: &str = "SHEPHERD_HANDOFF_TOKEN";
 
 #[cfg(unix)]
 #[derive(Serialize, Deserialize)]
+pub(crate) struct HandoffDockOwnership {
+    pub workspace_id: String,
+    pub pane_id: u32,
+}
+
+#[cfg(unix)]
+#[derive(Serialize, Deserialize)]
 pub(crate) struct HandoffManifest {
     pub version: u32,
     pub source_version: String,
@@ -43,6 +50,8 @@ pub(crate) struct HandoffManifest {
     pub expected_protocol: Option<u32>,
     pub snapshot: crate::persist::SessionSnapshot,
     pub panes: Vec<crate::handoff_runtime::HandoffRuntimeState>,
+    #[serde(default)]
+    pub dock_ownership: Vec<HandoffDockOwnership>,
 }
 
 #[cfg(unix)]
@@ -297,6 +306,7 @@ pub(crate) fn manifest_for(
     panes: Vec<crate::handoff_runtime::HandoffRuntimeState>,
     expected_protocol: Option<u32>,
     expected_version: Option<String>,
+    dock_ownership: Vec<HandoffDockOwnership>,
 ) -> HandoffManifest {
     HandoffManifest {
         version: HANDOFF_VERSION,
@@ -306,6 +316,7 @@ pub(crate) fn manifest_for(
         expected_protocol,
         snapshot,
         panes,
+        dock_ownership,
     }
 }
 
@@ -597,6 +608,23 @@ mod tests {
             "shepherd-handoff-{label}-{}-{n}",
             std::process::id()
         ))
+    }
+
+    #[test]
+    fn live_handoff_manifest_carries_defaulted_dock_ownership_metadata() {
+        let snapshot = crate::persist::SessionSnapshot {
+            version: 3,
+            workspaces: Vec::new(),
+            active: None,
+            selected: 0,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: std::collections::HashSet::new(),
+        };
+        let manifest = manifest_for(snapshot, Vec::new(), None, None, Vec::new());
+        let value = serde_json::to_value(manifest).expect("serialize manifest");
+
+        assert_eq!(value.get("dock_ownership"), Some(&serde_json::json!([])));
     }
 
     #[test]

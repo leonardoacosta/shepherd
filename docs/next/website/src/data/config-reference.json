@@ -684,13 +684,13 @@
           "key": "ui.topbar.enabled",
           "type": "boolean",
           "default": "false",
-          "description": "Show the configurable workspace top bar."
+          "description": "Show the configurable desktop workspace top bar. Nonempty resolved rows reserve one terminal row each while preserving at least one body row."
         },
         {
           "key": "ui.topbar.rows",
           "type": "list of token rows",
           "default": "[[\"workspace\"]]",
-          "description": "Top-bar layout using the same built-in and $name metadata tokens as Agent sidebar rows.",
+          "description": "Top-bar layout using active-main-pane Agent built-ins, workspace-first $name metadata, and the same inline token styles and separators as Agent sidebar rows.",
           "values": [
             "stateicon",
             "statetext",
@@ -707,7 +707,7 @@
           "key": "ui.dock.enabled",
           "type": "boolean",
           "default": "false",
-          "description": "Enable the workspace-scoped plugin dock."
+          "description": "Enable the desktop workspace-scoped plugin dock. Enabling presentation does not launch plugin code; open an eligible dock pane explicitly from Settings > Display."
         },
         {
           "key": "ui.dock.side",
@@ -723,7 +723,7 @@
           "key": "ui.dock.size",
           "type": "integer",
           "default": "10",
-          "description": "Dock height in rows for a bottom dock or width in columns for a right dock."
+          "description": "Dock height in rows for a bottom dock or width in columns for a right dock. Minimum 3; live geometry is bounded to preserve one main-content row or column."
         },
         {
           "key": "ui.sidebar.agents.row_gap",

@@ -256,6 +256,42 @@ Color values accept hex, named colors, `rgb(r,g,b)`, or reset aliases like `rese
 
 The sidebar is the main Shepherd dashboard. Search `ui.` in the [Config reference](/docs/config-reference/) for sizing, collapsed mode, Agent panel ordering, mouse behavior, pane borders, and other presentation settings.
 
+### Topbar and dock
+
+The optional topbar and plugin dock are desktop-only workspace chrome. They do not reserve space in the mobile single-column layout.
+
+Configure one or more topbar rows with the Agent sidebar token vocabulary:
+
+```toml
+[ui.topbar]
+enabled = true
+rows = [
+  ["state_icon", "workspace", "tab"],
+  [{ token = "$summary", fg = "#89b4fa", bold = true }],
+]
+```
+
+Each inner array is one line. Empty tokens and separators disappear, and a completely empty line takes no space. Built-ins such as `state_icon`, `state_text`, `tab`, `pane`, `agent`, and terminal-title tokens use the focused pane in the active main tab; dock focus does not replace that context. `workspace` uses the active workspace. For a custom `$name`, workspace metadata wins and focused-main-pane metadata is the fallback. Inline `fg`, `bold`, and `dim` styles and separator behavior match Agent sidebar rows. Shepherd clips the resolved rows when necessary so at least one desktop body row remains.
+
+Enable and position the workspace-scoped plugin dock separately:
+
+```toml
+[ui.dock]
+enabled = true
+side = "bottom" # or "right"
+size = 10
+```
+
+`size` is the bottom height or right-side width in terminal cells and must be at least `3`. A live dock is bounded to preserve at least one row or column for the main workspace; when the terminal cannot fit both, Shepherd hides the dock geometry instead of making the main surface unusable. Enabling the dock only permits presentation—it does not run plugin code.
+
+Open Settings and choose **Display** to toggle the topbar and dock, change the dock side or size, and explicitly open a dock-capable pane. Shepherd lists only enabled, platform-supported installed plugin panes whose manifest uses `placement = "dock"`. An empty list is informational. Launch failures remain in Settings with an actionable error such as `plugin_dock_disabled` or `plugin_dock_occupied`; a failed launch does not reserve blank geometry.
+
+Click a live dock to give it auxiliary input focus without changing the active main tab or pane. Keys, paste, selection, scrollback, and application mouse reporting then target the dock, while Shepherd prefix and direct shortcuts still take precedence. Clicking or navigating the main workspace returns input there. Disabling the dock hides it and clears auxiliary focus without terminating its process; re-enabling it reveals the same live pane.
+
+The dock process uses a hidden backing tab. Ordinary desktop/mobile tab lists and TUI tab navigation omit that tab, while neutral live tab and pane APIs can still address its identity. Disk session snapshots omit the backing tab, so restarting or restoring Shepherd never automatically reruns dock plugin code; reopen it explicitly from Display. A compatible live handoff on Unix is different: it transfers the already-running runtime and restores private dock ownership. Incompatible, absent, or invalid handoff metadata safely falls back to no dock ownership.
+
+Custom topbar metadata is presentation data supplied through pane or workspace metadata reporting. Shepherd resolves and renders those values, but it does not install, start, supervise, or infer the lifecycle of the script or plugin that produces them. Configure that producer separately and use its existing clear, sequence, and expiry controls.
+
 ### Sidebar row layouts
 
 The expanded desktop sidebar renders each inner array in `rows` as one line. These are the complete default layouts:

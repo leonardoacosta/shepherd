@@ -134,9 +134,16 @@ impl App {
             return None;
         }
 
-        let ws_idx = self.state.active?;
+        self.state.clear_invalid_dock_focus(&self.terminal_runtimes);
+        let (ws_idx, pane_id) =
+            if let Some(target) = self.state.focused_dock_pane(&self.terminal_runtimes) {
+                target
+            } else {
+                let ws_idx = self.state.active?;
+                let pane_id = self.state.workspaces.get(ws_idx)?.focused_pane_id()?;
+                (ws_idx, pane_id)
+            };
         let ws = self.state.workspaces.get(ws_idx)?;
-        let pane_id = ws.focused_pane_id()?;
         let terminal_id = ws.terminal_id(pane_id)?.clone();
         let rt =
             self.state
@@ -273,10 +280,21 @@ impl App {
         let runtime = if self.state.popup_pane.is_some() {
             self.popup_runtime()
         } else if self.state.mode == Mode::Terminal {
-            self.state.active.and_then(|ws_idx| {
-                self.state
-                    .focused_runtime_in_workspace(&self.terminal_runtimes, ws_idx)
-            })
+            self.state
+                .focused_dock_pane(&self.terminal_runtimes)
+                .and_then(|(ws_idx, pane_id)| {
+                    self.state.runtime_for_pane_in_workspace(
+                        &self.terminal_runtimes,
+                        ws_idx,
+                        pane_id,
+                    )
+                })
+                .or_else(|| {
+                    self.state.active.and_then(|ws_idx| {
+                        self.state
+                            .focused_runtime_in_workspace(&self.terminal_runtimes, ws_idx)
+                    })
+                })
         } else {
             None
         };
@@ -1836,5 +1854,81 @@ mod tests {
             .and_then(crate::terminal::TerminalRuntime::scroll_metrics)
             .expect("scroll metrics after PageUp");
         assert_eq!(end_metrics.offset_from_bottom, 0);
+    }
+
+    #[tokio::test]
+    async fn dock_focus_routes_key_paste_and_release_to_auxiliary_runtime() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("dock-input");
+        let main_pane = ws.tabs[0].root_pane;
+        let dock_tab = ws.test_add_tab(Some("dock-backing"));
+        let dock_pane = ws.tabs[dock_tab].root_pane;
+        let (main_runtime, mut main_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel(70, 20);
+        let (dock_runtime, mut dock_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                20,
+                20,
+                0,
+                b"\x1b[>15u",
+                8,
+            );
+        ws.insert_test_runtime(main_pane, main_runtime);
+        ws.insert_test_runtime(dock_pane, dock_runtime);
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.dock_enabled = true;
+        app.state
+            .reserve_dock_pane(0, dock_pane)
+            .expect("dock reservation");
+        app.state.ensure_test_terminals();
+        assert!(app.state.focus_dock_pane(0, dock_pane));
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 100, 24));
+
+        let press = TerminalKey::new(KeyCode::Char('j'), KeyModifiers::empty())
+            .with_kind(KeyEventKind::Press);
+        app.route_client_events_from(7, vec![crate::raw_input::RawInputEvent::Key(press)], true);
+        assert_eq!(
+            dock_rx.try_recv().expect("dock key press"),
+            Bytes::from_static(b"\x1b[106;1:1u")
+        );
+        assert!(main_rx.try_recv().is_err());
+
+        app.state.dock_focus = None;
+        let release = press.with_kind(KeyEventKind::Release);
+        app.route_client_events_from(7, vec![crate::raw_input::RawInputEvent::Key(release)], true);
+        assert_eq!(
+            dock_rx.try_recv().expect("dock key release keeps owner"),
+            Bytes::from_static(b"\x1b[106;1:3u")
+        );
+        assert!(main_rx.try_recv().is_err());
+
+        assert!(app.state.focus_dock_pane(0, dock_pane));
+        app.route_client_events_from(
+            7,
+            vec![crate::raw_input::RawInputEvent::Paste("dock paste".into())],
+            true,
+        );
+        assert_eq!(
+            dock_rx.try_recv().expect("dock paste"),
+            Bytes::from_static(b"dock paste")
+        );
+
+        app.state.dock_enabled = false;
+        app.route_client_events_from(
+            7,
+            vec![crate::raw_input::RawInputEvent::Key(TerminalKey::new(
+                KeyCode::Char('m'),
+                KeyModifiers::empty(),
+            ))],
+            true,
+        );
+        assert_eq!(
+            main_rx.try_recv().expect("main input after dock hide"),
+            Bytes::from_static(b"m")
+        );
+        assert!(app.state.dock_focus.is_none());
     }
 }

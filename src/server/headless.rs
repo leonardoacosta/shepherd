@@ -140,7 +140,19 @@ fn record_render_impact(source: &'static str, impact: RenderImpact) {
     crate::render_prof::event(event);
 }
 
-type ClientViewProjection = (u16, bool, f32, usize, usize, usize, bool, usize, bool, bool);
+type ClientViewProjection = (
+    u16,
+    bool,
+    f32,
+    usize,
+    usize,
+    usize,
+    bool,
+    usize,
+    bool,
+    bool,
+    Option<crate::app::state::DockFocus>,
+);
 
 fn rect_fits_frame(rect: Rect, frame: &FrameData) -> bool {
     rect.x.saturating_add(rect.width) <= frame.width
@@ -1020,6 +1032,7 @@ impl HeadlessServer {
                 view.mobile_switcher_scroll,
                 view.mouse_capture,
                 view.copy_on_select,
+                view.dock_focus.clone(),
             )
         });
         let uses_local_keybindings = client.keybindings.is_some();
@@ -1060,6 +1073,7 @@ impl HeadlessServer {
             view.mobile_switcher_scroll,
             view.mouse_capture,
             view.copy_on_select,
+            view.dock_focus.clone(),
         ))
     }
 
@@ -1090,6 +1104,7 @@ impl HeadlessServer {
             mobile_switcher_scroll,
             mouse_capture,
             copy_on_select,
+            dock_focus,
         )) = client_view_projection
         {
             self.app.state.sidebar_width = sidebar_width;
@@ -1102,6 +1117,7 @@ impl HeadlessServer {
             self.app.state.mobile_switcher_scroll = mobile_switcher_scroll;
             self.app.state.mouse_capture = mouse_capture;
             self.app.state.copy_on_select = copy_on_select;
+            self.app.state.dock_focus = dock_focus;
         }
     }
 
@@ -3029,6 +3045,7 @@ fn run_handoff_import_server(socket_path: &Path, token: &str) -> io::Result<()> 
     let event_hub = api::EventHub::default();
 
     let mut imports = HashMap::new();
+    let dock_ownership = std::mem::take(&mut received.manifest.dock_ownership);
     for (pane, fd) in received.manifest.panes.into_iter().zip(received.fds) {
         let pane_id = pane.pane_id;
         imports.insert(
@@ -3053,6 +3070,7 @@ fn run_handoff_import_server(socket_path: &Path, token: &str) -> io::Result<()> 
             event_hub.clone(),
             &received.manifest.snapshot,
             &mut imports,
+            &dock_ownership,
         )?;
         app.state.local_sound_playback = false;
         app.local_terminal_notifications = false;

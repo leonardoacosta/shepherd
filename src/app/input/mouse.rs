@@ -81,6 +81,20 @@ impl AppState {
         let Some(info) = self.pane_at(mouse.column, mouse.row).cloned() else {
             return;
         };
+        let is_dock = self
+            .view
+            .dock_pane_info
+            .as_ref()
+            .is_some_and(|dock| dock.id == info.id);
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            if is_dock {
+                if let Some(ws_idx) = self.active {
+                    self.focus_dock_pane(ws_idx, info.id);
+                }
+            } else {
+                self.dock_focus = None;
+            }
+        }
 
         match mouse.kind {
             MouseEventKind::ScrollUp
@@ -626,10 +640,25 @@ impl AppState {
                         self.mode = Mode::Terminal;
                     }
 
+                    let is_dock = self
+                        .view
+                        .dock_pane_info
+                        .as_ref()
+                        .is_some_and(|dock| dock.id == info.id);
+                    if is_dock {
+                        if let Some(ws_idx) = self.active {
+                            self.focus_dock_pane(ws_idx, info.id);
+                        }
+                    } else {
+                        self.dock_focus = None;
+                    }
+
                     if self.forward_pane_mouse_button(terminal_runtimes, &info, mouse) {
                         self.selection = None;
                         self.selection_autoscroll = None;
-                        return self.mouse_pane_focus_action(info.id);
+                        return (!is_dock)
+                            .then(|| self.mouse_pane_focus_action(info.id))
+                            .flatten();
                     }
 
                     let (row, col) = (
@@ -642,7 +671,9 @@ impl AppState {
                         col,
                         self.pane_scroll_metrics(terminal_runtimes, info.id),
                     ));
-                    return self.mouse_pane_focus_action(info.id);
+                    return (!is_dock)
+                        .then(|| self.mouse_pane_focus_action(info.id))
+                        .flatten();
                 } else if let Some(info) = self.view.pane_infos.iter().find(|p| {
                     mouse.column >= p.rect.x
                         && mouse.column < p.rect.x + p.rect.width
@@ -917,22 +948,29 @@ impl AppState {
             {
                 match mouse.kind {
                     MouseEventKind::ScrollUp => {
-                        if let Some(ws) = self.active.and_then(|i| self.workspaces.get(i)) {
-                            if !ws.tabs.is_empty() {
-                                let prev = if ws.active_tab == 0 {
-                                    ws.tabs.len() - 1
-                                } else {
-                                    ws.active_tab - 1
-                                };
-                                return Some(MouseAction::FocusTab { tab_idx: prev });
+                        if let Some(ws_idx) = self.active {
+                            let visible = self.visible_tab_indices(ws_idx);
+                            let active_tab = self.workspaces[ws_idx].active_tab;
+                            if let Some(current) =
+                                visible.iter().position(|tab_idx| *tab_idx == active_tab)
+                            {
+                                let previous = (current + visible.len() - 1) % visible.len();
+                                return Some(MouseAction::FocusTab {
+                                    tab_idx: visible[previous],
+                                });
                             }
                         }
                     }
                     MouseEventKind::ScrollDown => {
-                        if let Some(ws) = self.active.and_then(|i| self.workspaces.get(i)) {
-                            if !ws.tabs.is_empty() {
-                                let next = (ws.active_tab + 1) % ws.tabs.len();
-                                return Some(MouseAction::FocusTab { tab_idx: next });
+                        if let Some(ws_idx) = self.active {
+                            let visible = self.visible_tab_indices(ws_idx);
+                            let active_tab = self.workspaces[ws_idx].active_tab;
+                            if let Some(current) =
+                                visible.iter().position(|tab_idx| *tab_idx == active_tab)
+                            {
+                                return Some(MouseAction::FocusTab {
+                                    tab_idx: visible[(current + 1) % visible.len()],
+                                });
                             }
                         }
                     }
@@ -1407,12 +1445,16 @@ impl AppState {
     }
 
     pub(super) fn pane_at(&self, col: u16, row: u16) -> Option<&PaneInfo> {
-        self.view.pane_infos.iter().find(|p| {
-            col >= p.inner_rect.x
-                && col < p.inner_rect.x + p.inner_rect.width
-                && row >= p.inner_rect.y
-                && row < p.inner_rect.y + p.inner_rect.height
-        })
+        self.view
+            .dock_pane_info
+            .iter()
+            .chain(&self.view.pane_infos)
+            .find(|p| {
+                col >= p.inner_rect.x
+                    && col < p.inner_rect.x + p.inner_rect.width
+                    && row >= p.inner_rect.y
+                    && row < p.inner_rect.y + p.inner_rect.height
+            })
     }
 
     pub(super) fn pane_mouse_target(&self, col: u16, row: u16) -> Option<&PaneInfo> {
@@ -1431,16 +1473,29 @@ impl AppState {
     }
 
     pub(crate) fn pane_info_by_id(&self, pane_id: crate::layout::PaneId) -> Option<&PaneInfo> {
-        self.view.pane_infos.iter().find(|info| info.id == pane_id)
+        self.view
+            .pane_infos
+            .iter()
+            .find(|info| info.id == pane_id)
+            .or_else(|| {
+                self.view
+                    .dock_pane_info
+                    .as_ref()
+                    .filter(|info| info.id == pane_id)
+            })
     }
 
     pub(super) fn pane_frame_at(&self, col: u16, row: u16) -> Option<&PaneInfo> {
-        self.view.pane_infos.iter().find(|p| {
-            col >= p.rect.x
-                && col < p.rect.x + p.rect.width
-                && row >= p.rect.y
-                && row < p.rect.y + p.rect.height
-        })
+        self.view
+            .dock_pane_info
+            .iter()
+            .chain(&self.view.pane_infos)
+            .find(|p| {
+                col >= p.rect.x
+                    && col < p.rect.x + p.rect.width
+                    && row >= p.rect.y
+                    && row < p.rect.y + p.rect.height
+            })
     }
 
     pub(super) fn focus_pane(&mut self, pane_id: crate::layout::PaneId) {
@@ -3962,6 +4017,71 @@ mod tests {
         ));
 
         assert_eq!(app.state.mode, Mode::Terminal);
+    }
+
+    #[tokio::test]
+    async fn dock_focus_first_click_routes_mouse_in_inner_coordinates_and_main_click_clears() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("dock-mouse");
+        let main_pane = ws.tabs[0].root_pane;
+        let dock_tab = ws.test_add_tab(Some("dock-backing"));
+        let dock_pane = ws.tabs[dock_tab].root_pane;
+        ws.insert_test_runtime(
+            main_pane,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(70, 20, b""),
+        );
+        let (dock_runtime, mut dock_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                20,
+                20,
+                0,
+                b"\x1b[?1002h\x1b[?1006h",
+                8,
+            );
+        ws.insert_test_runtime(dock_pane, dock_runtime);
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.dock_enabled = true;
+        app.state.mouse_capture = false;
+        app.state
+            .reserve_dock_pane(0, dock_pane)
+            .expect("dock reservation");
+        app.state.ensure_test_terminals();
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 100, 24));
+
+        assert!(app
+            .state
+            .should_capture_host_mouse_from(&app.terminal_runtimes));
+        let dock = app
+            .state
+            .view
+            .dock_pane_info
+            .clone()
+            .expect("visible dock target");
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            dock.inner_rect.x + 2,
+            dock.inner_rect.y + 3,
+        ));
+
+        assert!(app.state.dock_focus.as_ref().is_some_and(|focus| {
+            focus.workspace_id == app.state.workspaces[0].id && focus.pane_id == dock_pane
+        }));
+        assert_eq!(
+            dock_rx.try_recv().expect("dock first-click mouse report"),
+            bytes::Bytes::from_static(b"\x1b[<0;3;4M")
+        );
+        assert_eq!(app.state.workspaces[0].active_tab, 0);
+
+        let main = app.state.view.pane_infos[0].clone();
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            main.inner_rect.x,
+            main.inner_rect.y,
+        ));
+        assert!(app.state.dock_focus.is_none());
     }
 
     #[test]

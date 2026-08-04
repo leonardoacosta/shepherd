@@ -40,18 +40,9 @@ impl App {
         if self.state.workspaces.is_empty() {
             SessionSaveJob::Clear
         } else {
-            let snapshot = crate::persist::capture(
-                &self.state.workspaces,
-                &self.state.terminals,
-                &self.terminal_runtimes,
-                self.state.active,
-                self.state.selected,
-                self.state.sidebar_width,
-                self.state.sidebar_section_split,
-                self.state.collapsed_space_keys.clone(),
-            );
+            let snapshot = crate::persist::capture_for_disk(&self.state, &self.terminal_runtimes);
             let history = self.persist_pane_history.then(|| {
-                crate::persist::capture_history(&self.state.workspaces, &self.terminal_runtimes)
+                crate::persist::capture_history_for_disk(&self.state, &self.terminal_runtimes)
             });
             SessionSaveJob::Save { snapshot, history }
         }

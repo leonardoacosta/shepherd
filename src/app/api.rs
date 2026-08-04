@@ -1911,6 +1911,35 @@ mod tests {
     }
 
     #[test]
+    fn pane_exit_closes_workspace_when_only_hidden_dock_would_remain() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            true,
+            None,
+            api_rx,
+            event_hub,
+        );
+        let mut workspace = crate::workspace::Workspace::test_new("pane-exit-with-dock");
+        let main_pane = workspace.tabs[0].root_pane;
+        let dock_tab = workspace.test_add_tab(Some("dock-backing"));
+        let dock_pane = workspace.tabs[dock_tab].root_pane;
+        app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state
+            .reserve_dock_pane(0, dock_pane)
+            .expect("dock reservation");
+
+        app.handle_internal_event(AppEvent::PaneDied { pane_id: main_pane });
+
+        assert!(app.state.workspaces.is_empty());
+        assert!(app.state.dock_panes.is_empty());
+    }
+
+    #[test]
     fn idle_agent_exit_emits_release_event_without_a_state_change() {
         for agent_name in [None, Some("reviewer")] {
             let event_hub = crate::api::EventHub::default();

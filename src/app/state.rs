@@ -20,7 +20,12 @@ pub(crate) struct PluginPaneRecord {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct DockPaneRecord {
     pub pane_id: PaneId,
-    pub tab_idx: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DockFocus {
+    pub workspace_id: String,
+    pub pane_id: PaneId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -786,6 +791,7 @@ pub struct ViewState {
     pub tab_bar_rect: Rect,
     pub topbar_rect: Rect,
     pub dock_rect: Rect,
+    pub dock_pane_info: Option<PaneInfo>,
     pub tab_hit_areas: Vec<Rect>,
     pub tab_scroll_left_hit_area: Rect,
     pub tab_scroll_right_hit_area: Rect,
@@ -809,6 +815,7 @@ impl ViewState {
             tab_bar_rect: _,
             topbar_rect: _,
             dock_rect: _,
+            dock_pane_info: _,
             tab_hit_areas: _,
             tab_scroll_left_hit_area: _,
             tab_scroll_right_hit_area: _,
@@ -829,6 +836,7 @@ impl ViewState {
             "tab_bar_rect",
             "topbar_rect",
             "dock_rect",
+            "dock_pane_info",
             "tab_hit_areas",
             "tab_scroll_left_hit_area",
             "tab_scroll_right_hit_area",
@@ -858,6 +866,7 @@ pub struct ClientViewState {
     pub mobile_switcher_scroll: usize,
     pub mouse_capture: bool,
     pub copy_on_select: bool,
+    pub dock_focus: Option<DockFocus>,
     pub view: ViewState,
 }
 
@@ -877,6 +886,7 @@ impl ClientViewState {
             mobile_switcher_scroll: _,
             mouse_capture: _,
             copy_on_select: _,
+            dock_focus: _,
             view: _,
         } = ClientViewState {
             mode: seed.mode,
@@ -890,6 +900,7 @@ impl ClientViewState {
             mobile_switcher_scroll: seed.mobile_switcher_scroll,
             mouse_capture: seed.mouse_capture,
             copy_on_select: seed.copy_on_select,
+            dock_focus: seed.dock_focus,
             view: seed.view,
         };
 
@@ -905,6 +916,7 @@ impl ClientViewState {
             "mobile_switcher_scroll",
             "mouse_capture",
             "copy_on_select",
+            "dock_focus",
             "view",
         ]
     }
@@ -1112,7 +1124,7 @@ pub enum SettingsSection {
     Theme,
     Sound,
     Toast,
-    PaneLabels,
+    Display,
     Experiments,
     Integrations,
 }
@@ -1122,7 +1134,7 @@ impl SettingsSection {
         Self::Theme,
         Self::Sound,
         Self::Toast,
-        Self::PaneLabels,
+        Self::Display,
         Self::Integrations,
         Self::Experiments,
     ];
@@ -1132,11 +1144,43 @@ impl SettingsSection {
             Self::Theme => "theme",
             Self::Sound => "sound",
             Self::Toast => "toasts",
-            Self::PaneLabels => "pane labels",
+            Self::Display => "display",
             Self::Experiments => "experiments",
             Self::Integrations => "integrations",
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DockPaneCandidate {
+    pub plugin_id: String,
+    pub entrypoint: String,
+    pub plugin_name: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DisplayRowId {
+    AgentBorderLabels,
+    TopbarEnabled,
+    TopbarRows,
+    DockEnabled,
+    DockSide,
+    DockSize,
+    DockCandidate {
+        plugin_id: String,
+        entrypoint: String,
+    },
+    Status,
+    DesktopOnly,
+    Diagnostic,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DisplayRow {
+    pub id: DisplayRowId,
+    pub label: String,
+    pub selectable: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1260,6 +1304,8 @@ pub struct SettingsState {
     pub original_palette: Option<Palette>,
     /// The theme name before opening settings.
     pub original_theme: Option<String>,
+    /// Bounded feedback from the most recent Display action.
+    pub display_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1591,6 +1637,7 @@ pub struct AppState {
     pub tab_scroll: usize,
     pub tab_scroll_follow_active: bool,
     pub mobile_switcher_scroll: usize,
+    pub(crate) dock_focus: Option<DockFocus>,
     // View geometry (computed before render, consumed by render + mouse)
     pub view: ViewState,
     pub(crate) drag: Option<DragState>,
@@ -1787,6 +1834,161 @@ impl AppState {
         section == SettingsSection::Integrations && self.integration_updates_available()
     }
 
+    pub(crate) fn display_rows(&self) -> Vec<DisplayRow> {
+        let checkbox = |enabled| if enabled { "[✓]" } else { "[ ]" };
+        let mut rows = vec![
+            DisplayRow {
+                id: DisplayRowId::AgentBorderLabels,
+                label: format!(
+                    "agent border labels {}",
+                    checkbox(self.agent_border_labels_enabled())
+                ),
+                selectable: true,
+            },
+            DisplayRow {
+                id: DisplayRowId::TopbarEnabled,
+                label: format!("topbar {}", checkbox(self.topbar_enabled)),
+                selectable: true,
+            },
+            DisplayRow {
+                id: DisplayRowId::TopbarRows,
+                label: format!(
+                    "topbar rows: {} configured · edit config.toml for tokens",
+                    self.topbar_rows.len()
+                ),
+                selectable: false,
+            },
+            DisplayRow {
+                id: DisplayRowId::DockEnabled,
+                label: format!("dock {}", checkbox(self.dock_enabled)),
+                selectable: true,
+            },
+            DisplayRow {
+                id: DisplayRowId::DockSide,
+                label: format!(
+                    "dock side: {}",
+                    match self.dock_side {
+                        crate::config::DockSide::Bottom => "bottom",
+                        crate::config::DockSide::Right => "right",
+                    }
+                ),
+                selectable: true,
+            },
+            DisplayRow {
+                id: DisplayRowId::DockSize,
+                label: format!("dock size: [-] {} [+]", self.dock_size),
+                selectable: true,
+            },
+        ];
+
+        if self.view.layout == ViewLayout::Mobile {
+            rows.push(DisplayRow {
+                id: DisplayRowId::DesktopOnly,
+                label: "topbar and dock affect desktop layout only".to_string(),
+                selectable: false,
+            });
+        }
+
+        let dock_occupied = self
+            .active
+            .is_some_and(|ws_idx| self.dock_backing_tab_idx(ws_idx).is_some());
+        if !self.dock_enabled {
+            rows.push(DisplayRow {
+                id: DisplayRowId::Status,
+                label: "enable the dock to choose a plugin pane".to_string(),
+                selectable: false,
+            });
+        } else if dock_occupied {
+            rows.push(DisplayRow {
+                id: DisplayRowId::Status,
+                label: "this workspace dock is occupied; close it to choose another".to_string(),
+                selectable: false,
+            });
+        } else if self.active.is_none() {
+            rows.push(DisplayRow {
+                id: DisplayRowId::Status,
+                label: "open a workspace to choose a dock pane".to_string(),
+                selectable: false,
+            });
+        } else {
+            let candidates =
+                crate::app::api::plugins::eligible_dock_pane_candidates(&self.installed_plugins);
+            if candidates.is_empty() {
+                rows.push(DisplayRow {
+                    id: DisplayRowId::Status,
+                    label: "no enabled, supported plugin dock panes found".to_string(),
+                    selectable: false,
+                });
+            } else {
+                rows.extend(candidates.into_iter().map(|candidate| DisplayRow {
+                    id: DisplayRowId::DockCandidate {
+                        plugin_id: candidate.plugin_id,
+                        entrypoint: candidate.entrypoint,
+                    },
+                    label: format!("open {} · {}", candidate.plugin_name, candidate.title),
+                    selectable: true,
+                }));
+            }
+        }
+
+        if let Some(message) = &self.settings.display_message {
+            rows.push(DisplayRow {
+                id: DisplayRowId::Diagnostic,
+                label: message.clone(),
+                selectable: false,
+            });
+        }
+        rows
+    }
+
+    pub(crate) fn normalize_display_selection(&mut self, preferred: Option<&DisplayRowId>) {
+        let rows = self.display_rows();
+        let selected = preferred
+            .and_then(|preferred| rows.iter().position(|row| &row.id == preferred))
+            .filter(|idx| rows[*idx].selectable)
+            .or_else(|| {
+                rows.get(self.settings.list.selected)
+                    .is_some_and(|row| row.selectable)
+                    .then_some(self.settings.list.selected)
+            })
+            .or_else(|| rows.iter().position(|row| row.selectable))
+            .unwrap_or(0);
+        self.settings.list.selected = selected;
+    }
+
+    pub(crate) fn move_display_selection(&mut self, direction: i8) {
+        let rows = self.display_rows();
+        let selectable = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, row)| row.selectable.then_some(idx))
+            .collect::<Vec<_>>();
+        let Some(current) = selectable
+            .iter()
+            .position(|idx| *idx == self.settings.list.selected)
+        else {
+            self.normalize_display_selection(None);
+            return;
+        };
+        let next = if direction < 0 {
+            current.saturating_sub(1)
+        } else {
+            (current + 1).min(selectable.len().saturating_sub(1))
+        };
+        self.settings.list.selected = selectable[next];
+    }
+
+    pub(crate) fn display_scroll_start(&self, visible_rows: usize) -> usize {
+        if visible_rows == 0 {
+            return 0;
+        }
+        self.settings
+            .list
+            .selected
+            .saturating_add(1)
+            .saturating_sub(visible_rows)
+    }
+
     pub(crate) fn focused_pane_requests_mouse_capture_from(
         &self,
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
@@ -1806,6 +2008,21 @@ impl AppState {
         self.mouse_capture
             || self.popup_pane.is_some()
             || self.focused_pane_requests_mouse_capture_from(terminal_runtimes)
+            || (self.mode == Mode::Terminal
+                && self.dock_enabled
+                && self.active.is_some_and(|ws_idx| {
+                    self.dock_backing_tab_idx(ws_idx)
+                        .and_then(|tab_idx| self.workspaces[ws_idx].tabs.get(tab_idx))
+                        .and_then(|tab| {
+                            self.runtime_for_pane_in_workspace(
+                                terminal_runtimes,
+                                ws_idx,
+                                tab.root_pane,
+                            )
+                        })
+                        .and_then(crate::terminal::TerminalRuntime::input_state)
+                        .is_some_and(crate::pane::InputState::mouse_reporting_enabled)
+                }))
     }
 
     pub fn is_prefix_key(&self, key: crate::input::TerminalKey) -> bool {
@@ -1844,6 +2061,113 @@ impl AppState {
         }
         let terminal_id = self.workspaces.get(ws_idx)?.terminal_id(pane_id)?;
         terminal_runtimes.get(terminal_id)
+    }
+
+    pub(crate) fn dock_backing_tab_idx(&self, ws_idx: usize) -> Option<usize> {
+        let workspace = self.workspaces.get(ws_idx)?;
+        let record = self.dock_panes.get(&workspace.id)?;
+        let tab_idx = workspace.find_tab_index_for_pane(record.pane_id)?;
+        let tab = workspace.tabs.get(tab_idx)?;
+        (tab.panes.len() == 1
+            && tab.root_pane == record.pane_id
+            && tab.layout.focused() == record.pane_id)
+            .then_some(tab_idx)
+    }
+
+    pub(crate) fn is_dock_pane(&self, ws_idx: usize, pane_id: PaneId) -> bool {
+        self.dock_backing_tab_idx(ws_idx).is_some_and(|tab_idx| {
+            self.workspaces[ws_idx].tabs[tab_idx]
+                .panes
+                .contains_key(&pane_id)
+        })
+    }
+
+    pub(crate) fn is_dock_tab(&self, ws_idx: usize, tab_idx: usize) -> bool {
+        self.dock_backing_tab_idx(ws_idx) == Some(tab_idx)
+    }
+
+    pub(crate) fn visible_tab_indices(&self, ws_idx: usize) -> Vec<usize> {
+        let Some(workspace) = self.workspaces.get(ws_idx) else {
+            return Vec::new();
+        };
+        let dock_tab_idx = self.dock_backing_tab_idx(ws_idx);
+        (0..workspace.tabs.len())
+            .filter(|tab_idx| Some(*tab_idx) != dock_tab_idx)
+            .collect()
+    }
+
+    pub(crate) fn reconcile_dock_panes(&mut self) {
+        let valid = self
+            .workspaces
+            .iter()
+            .filter_map(|workspace| {
+                let record = self.dock_panes.get(&workspace.id)?;
+                let tab_idx = workspace.find_tab_index_for_pane(record.pane_id)?;
+                let tab = workspace.tabs.get(tab_idx)?;
+                (tab.panes.len() == 1
+                    && tab.root_pane == record.pane_id
+                    && tab.layout.focused() == record.pane_id)
+                    .then_some((workspace.id.clone(), record.pane_id))
+            })
+            .collect::<std::collections::HashSet<_>>();
+        self.dock_panes
+            .retain(|workspace_id, record| valid.contains(&(workspace_id.clone(), record.pane_id)));
+        if self.dock_focus.as_ref().is_some_and(|focus| {
+            !self
+                .dock_panes
+                .get(&focus.workspace_id)
+                .is_some_and(|record| record.pane_id == focus.pane_id)
+        }) {
+            self.dock_focus = None;
+        }
+    }
+
+    pub(crate) fn focused_dock_pane(
+        &self,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+    ) -> Option<(usize, PaneId)> {
+        if !self.dock_enabled {
+            return None;
+        }
+        let focus = self.dock_focus.as_ref()?;
+        let ws_idx = self.active?;
+        let workspace = self.workspaces.get(ws_idx)?;
+        if focus.workspace_id != workspace.id {
+            return None;
+        }
+        let tab_idx = self.dock_backing_tab_idx(ws_idx)?;
+        let pane_id = workspace.tabs.get(tab_idx)?.root_pane;
+        if pane_id != focus.pane_id {
+            return None;
+        }
+        self.runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, pane_id)?;
+        Some((ws_idx, pane_id))
+    }
+
+    pub(crate) fn focus_dock_pane(&mut self, ws_idx: usize, pane_id: PaneId) -> bool {
+        let Some(workspace) = self.workspaces.get(ws_idx) else {
+            return false;
+        };
+        if self.active != Some(ws_idx)
+            || self.dock_backing_tab_idx(ws_idx).is_none()
+            || !self.is_dock_pane(ws_idx, pane_id)
+        {
+            return false;
+        }
+        self.dock_focus = Some(DockFocus {
+            workspace_id: workspace.id.clone(),
+            pane_id,
+        });
+        true
+    }
+
+    pub(crate) fn clear_invalid_dock_focus(
+        &mut self,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+    ) {
+        if self.focused_dock_pane(terminal_runtimes).is_none() {
+            self.dock_focus = None;
+        }
     }
 
     #[cfg(test)]
@@ -1910,6 +2234,7 @@ impl AppState {
             mobile_switcher_scroll: self.mobile_switcher_scroll,
             mouse_capture: self.mouse_capture,
             copy_on_select: self.copy_on_select,
+            dock_focus: self.dock_focus.clone(),
             view: ViewState {
                 layout: self.view.layout,
                 sidebar_rect: self.view.sidebar_rect,
@@ -1918,6 +2243,7 @@ impl AppState {
                 tab_bar_rect: self.view.tab_bar_rect,
                 topbar_rect: self.view.topbar_rect,
                 dock_rect: self.view.dock_rect,
+                dock_pane_info: self.view.dock_pane_info.clone(),
                 tab_hit_areas: self.view.tab_hit_areas.clone(),
                 tab_scroll_left_hit_area: self.view.tab_scroll_left_hit_area,
                 tab_scroll_right_hit_area: self.view.tab_scroll_right_hit_area,
@@ -2000,6 +2326,7 @@ impl AppState {
             tab_scroll: 0,
             tab_scroll_follow_active: true,
             mobile_switcher_scroll: 0,
+            dock_focus: None,
             view: ViewState {
                 layout: ViewLayout::Desktop,
                 sidebar_rect: Rect::default(),
@@ -2008,6 +2335,7 @@ impl AppState {
                 tab_bar_rect: Rect::default(),
                 topbar_rect: Rect::default(),
                 dock_rect: Rect::default(),
+                dock_pane_info: None,
                 tab_hit_areas: Vec::new(),
                 tab_scroll_left_hit_area: Rect::default(),
                 tab_scroll_right_hit_area: Rect::default(),
@@ -2105,6 +2433,7 @@ impl AppState {
                 list: SelectionListState::new(0),
                 original_palette: None,
                 original_theme: None,
+                display_message: None,
             },
             integration_recommendations: Vec::new(),
             agent_manifest_summaries: Vec::new(),
@@ -2364,6 +2693,16 @@ impl AppState {
         for &pane_id in self.plugin_panes.keys() {
             assert_live_pane(pane_id, "plugin pane record");
         }
+        for (workspace_id, dock) in &self.dock_panes {
+            assert_workspace_pane(workspace_id, dock.pane_id, "dock pane record");
+            let ws_idx = workspace_id_to_idx[workspace_id];
+            let tab_idx = self.workspaces[ws_idx]
+                .find_tab_index_for_pane(dock.pane_id)
+                .expect("dock pane must have a containing tab");
+            let tab = &self.workspaces[ws_idx].tabs[tab_idx];
+            assert_eq!(tab.panes.len(), 1, "dock backing tab must contain one pane");
+            assert_eq!(tab.root_pane, dock.pane_id, "dock pane must be tab root");
+        }
         if let Some(copy_mode) = &self.copy_mode {
             assert_live_pane(copy_mode.pane_id, "copy mode");
         }
@@ -2474,14 +2813,20 @@ impl AppState {
         &mut self,
         workspace_idx: usize,
         pane_id: PaneId,
-        tab_idx: usize,
     ) -> Result<(), ()> {
         let workspace_id = self.workspaces.get(workspace_idx).ok_or(())?.id.clone();
         if self.dock_panes.contains_key(&workspace_id) {
             return Err(());
         }
+        let tab_idx = self.workspaces[workspace_idx]
+            .find_tab_index_for_pane(pane_id)
+            .ok_or(())?;
+        let tab = &self.workspaces[workspace_idx].tabs[tab_idx];
+        if tab.panes.len() != 1 || tab.root_pane != pane_id || tab.layout.focused() != pane_id {
+            return Err(());
+        }
         self.dock_panes
-            .insert(workspace_id, DockPaneRecord { pane_id, tab_idx });
+            .insert(workspace_id, DockPaneRecord { pane_id });
         Ok(())
     }
 }
@@ -2497,11 +2842,51 @@ mod tests {
             .workspaces
             .push(crate::workspace::Workspace::test_new("dock-test"));
         let first = PaneId::alloc();
-        let second = PaneId::alloc();
-        assert!(state.reserve_dock_pane(0, first, 0).is_ok());
-        assert!(state.reserve_dock_pane(0, second, 1).is_err());
+        assert!(state.reserve_dock_pane(0, first).is_err());
+        let first_tab = state.workspaces[0].test_add_tab(Some("first-dock"));
+        let first = state.workspaces[0].tabs[first_tab].root_pane;
+        let second_tab = state.workspaces[0].test_add_tab(Some("second-dock"));
+        let second = state.workspaces[0].tabs[second_tab].root_pane;
+        assert!(state.reserve_dock_pane(0, first).is_ok());
+        assert!(state.reserve_dock_pane(0, second).is_err());
         state.remove_plugin_pane_records([first]);
-        assert!(state.reserve_dock_pane(0, second, 1).is_ok());
+        assert!(state.reserve_dock_pane(0, second).is_ok());
+    }
+
+    #[test]
+    fn dock_ownership_tracks_stable_pane_after_tab_index_shift() {
+        let mut state = AppState::test_new();
+        let mut workspace = crate::workspace::Workspace::test_new("dock-stable-pane");
+        let dock_tab = workspace.test_add_tab(Some("dock-backing"));
+        let dock_pane = workspace.tabs[dock_tab].root_pane;
+        for pane in workspace.tabs.iter().flat_map(|tab| tab.panes.values()) {
+            state.terminals.insert(
+                pane.attached_terminal_id.clone(),
+                crate::terminal::TerminalState::new(
+                    pane.attached_terminal_id.clone(),
+                    std::path::PathBuf::from("/tmp"),
+                ),
+            );
+        }
+        state.workspaces = vec![workspace];
+        state.active = Some(0);
+        state
+            .reserve_dock_pane(0, dock_pane)
+            .expect("dock reservation");
+
+        let tab_count = state.workspaces[0].tabs.len();
+        assert!(state.workspaces[0].move_tab(0, tab_count));
+        let resolved_tab = state.workspaces[0]
+            .find_tab_index_for_pane(dock_pane)
+            .expect("dock pane remains live");
+        assert_eq!(state.dock_backing_tab_idx(0), Some(resolved_tab));
+        state.workspaces[0].assert_invariants_for_test();
+        state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn settings_surfaces_presentation_controls_as_display() {
+        assert_eq!(SettingsSection::Display.label(), "display");
     }
     use crossterm::event::KeyEvent;
 
@@ -2742,6 +3127,7 @@ mod tests {
                 "tab_bar_rect",
                 "topbar_rect",
                 "dock_rect",
+                "dock_pane_info",
                 "tab_hit_areas",
                 "tab_scroll_left_hit_area",
                 "tab_scroll_right_hit_area",
@@ -2772,6 +3158,7 @@ mod tests {
                 "mobile_switcher_scroll",
                 "mouse_capture",
                 "copy_on_select",
+                "dock_focus",
                 "view",
             ]
         );

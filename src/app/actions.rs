@@ -407,7 +407,11 @@ impl AppState {
             let expanded = !matches!(query_kind, NavigatorQueryKind::Empty)
                 || self.navigator.expanded_workspaces.contains(&ws.id);
             let (state, seen) = ws.aggregate_state(&self.terminals);
-            let pane_count = ws.tabs.iter().map(|tab| tab.panes.len()).sum::<usize>();
+            let pane_count = self
+                .visible_tab_indices(ws_idx)
+                .into_iter()
+                .map(|tab_idx| ws.tabs[tab_idx].panes.len())
+                .sum::<usize>();
             rows.push(NavigatorRow {
                 target: NavigatorTarget::Workspace { ws_idx },
                 depth: 0,
@@ -436,12 +440,13 @@ impl AppState {
         query: &str,
         workspace_matches: bool,
     ) -> Vec<NavigatorRow> {
-        let Some(ws) = self.workspaces.get(ws_idx) else {
+        if self.workspaces.get(ws_idx).is_none() {
             return Vec::new();
-        };
-        let multi_tab = ws.tabs.len() > 1;
+        }
+        let visible_tab_indices = self.visible_tab_indices(ws_idx);
+        let multi_tab = visible_tab_indices.len() > 1;
         let mut rows = Vec::new();
-        for tab_idx in 0..ws.tabs.len() {
+        for tab_idx in visible_tab_indices {
             let mut tab_row = multi_tab.then(|| self.navigator_tab_row(ws_idx, tab_idx));
             let tab_matches = tab_row.as_ref().is_some_and(|row| match query_kind {
                 NavigatorQueryKind::Empty => true,
@@ -1471,25 +1476,40 @@ impl AppState {
 
     #[cfg(test)]
     pub fn next_tab(&mut self) {
-        if let Some(ws) = self.active.and_then(|i| self.workspaces.get(i)) {
-            if !ws.tabs.is_empty() {
-                let next = (ws.active_tab + 1) % ws.tabs.len();
-                self.switch_tab(next);
-            }
+        let Some(ws_idx) = self.active else {
+            return;
+        };
+        let visible = self.visible_tab_indices(ws_idx);
+        let Some(workspace) = self.workspaces.get(ws_idx) else {
+            return;
+        };
+        let current = visible
+            .iter()
+            .position(|tab_idx| *tab_idx == workspace.active_tab)
+            .unwrap_or(0);
+        if let Some(tab_idx) = visible.get((current + 1) % visible.len().max(1)).copied() {
+            self.switch_tab(tab_idx);
         }
     }
 
     #[cfg(test)]
     pub fn previous_tab(&mut self) {
-        if let Some(ws) = self.active.and_then(|i| self.workspaces.get(i)) {
-            if !ws.tabs.is_empty() {
-                let prev = if ws.active_tab == 0 {
-                    ws.tabs.len() - 1
-                } else {
-                    ws.active_tab - 1
-                };
-                self.switch_tab(prev);
-            }
+        let Some(ws_idx) = self.active else {
+            return;
+        };
+        let visible = self.visible_tab_indices(ws_idx);
+        let Some(workspace) = self.workspaces.get(ws_idx) else {
+            return;
+        };
+        let current = visible
+            .iter()
+            .position(|tab_idx| *tab_idx == workspace.active_tab)
+            .unwrap_or(0);
+        let previous = current
+            .checked_sub(1)
+            .unwrap_or_else(|| visible.len().saturating_sub(1));
+        if let Some(tab_idx) = visible.get(previous).copied() {
+            self.switch_tab(tab_idx);
         }
     }
 
@@ -1656,6 +1676,13 @@ impl AppState {
             self.previous_pane_focus = None;
         }
         for pane_id in pane_ids {
+            if self
+                .dock_focus
+                .as_ref()
+                .is_some_and(|focus| focus.pane_id == pane_id)
+            {
+                self.dock_focus = None;
+            }
             self.dock_panes.retain(|_, dock| dock.pane_id != pane_id);
             self.plugin_panes.remove(&pane_id);
             self.pane_graphics_layers.remove(&pane_id);
@@ -1735,7 +1762,7 @@ impl AppState {
 
     pub(crate) fn refresh_tab_bar_view(&mut self) {
         let area = self.view.tab_bar_rect;
-        let Some(ws) = self.active.and_then(|idx| self.workspaces.get(idx)) else {
+        let Some(ws_idx) = self.active else {
             self.tab_scroll = 0;
             self.view.tab_hit_areas.clear();
             self.view.tab_scroll_left_hit_area = ratatui::layout::Rect::default();
@@ -1744,8 +1771,9 @@ impl AppState {
             return;
         };
 
-        let layout = crate::ui::compute_tab_bar_view(
-            ws,
+        let layout = crate::ui::compute_tab_bar_view_for_app(
+            self,
+            ws_idx,
             area,
             self.tab_scroll,
             self.tab_scroll_follow_active,
@@ -2006,19 +2034,28 @@ impl AppState {
 
     #[cfg(test)]
     fn close_focused_pane_would_close_workspace(&self, ws_idx: usize) -> bool {
-        self.workspaces.get(ws_idx).is_some_and(|ws| {
-            let pane_count = ws
-                .active_tab()
-                .map(|tab| tab.layout.pane_count())
-                .unwrap_or(0);
-            pane_count <= 1 && ws.tabs.len() <= 1
-        })
+        self.workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.focused_pane_id())
+            .is_some_and(|pane_id| self.close_pane_would_close_workspace(ws_idx, pane_id))
+    }
+
+    pub(crate) fn close_tab_would_close_workspace(&self, ws_idx: usize, tab_idx: usize) -> bool {
+        let Some(workspace) = self.workspaces.get(ws_idx) else {
+            return false;
+        };
+        if tab_idx >= workspace.tabs.len() {
+            return false;
+        }
+        workspace.tabs.len() <= 1
+            || (!self.is_dock_tab(ws_idx, tab_idx) && self.visible_tab_indices(ws_idx).len() <= 1)
     }
 
     pub(crate) fn close_pane_would_close_workspace(&self, ws_idx: usize, pane_id: PaneId) -> bool {
         self.workspaces.get(ws_idx).is_some_and(|ws| {
             ws.find_tab_index_for_pane(pane_id).is_some_and(|tab_idx| {
-                ws.tabs[tab_idx].layout.pane_count() <= 1 && ws.tabs.len() <= 1
+                ws.tabs[tab_idx].layout.pane_count() <= 1
+                    && self.close_tab_would_close_workspace(ws_idx, tab_idx)
             })
         })
     }
@@ -2054,9 +2091,13 @@ impl AppState {
             .and_then(|i| self.workspaces.get(i).and_then(|ws| ws.focused_pane_id()))
             .into_iter()
             .collect::<Vec<_>>();
-        let should_close_workspace = active
-            .and_then(|i| self.workspaces.get_mut(i))
-            .is_some_and(|ws| ws.close_focused());
+        let should_close_workspace =
+            active.is_some_and(|ws_idx| self.close_focused_pane_would_close_workspace(ws_idx));
+        if !should_close_workspace {
+            if let Some(workspace) = active.and_then(|i| self.workspaces.get_mut(i)) {
+                let _ = workspace.close_focused();
+            }
+        }
         self.remove_plugin_pane_records(pane_ids);
         if should_close_workspace {
             if let Some(active) = active {
@@ -2073,10 +2114,9 @@ impl AppState {
     /// Close the active tab. Returns true when the close was deferred to confirmation.
     pub fn close_tab(&mut self) -> bool {
         if self.active.is_some_and(|ws_idx| {
-            self.workspaces
-                .get(ws_idx)
-                .is_some_and(|ws| ws.tabs.len() <= 1)
-                && self.workspace_close_would_close_worktree_group(ws_idx)
+            self.workspaces.get(ws_idx).is_some_and(|ws| {
+                self.close_tab_would_close_workspace(ws_idx, ws.active_tab_index())
+            }) && self.workspace_close_would_close_worktree_group(ws_idx)
         }) {
             if let Some(ws_idx) = self.active {
                 if self.confirm_implicit_worktree_group_close(ws_idx) {
@@ -2090,8 +2130,12 @@ impl AppState {
         self.mark_session_dirty();
         let should_close_workspace = self
             .active
-            .and_then(|i| self.workspaces.get(i))
-            .is_some_and(|ws| ws.tabs.len() <= 1);
+            .and_then(|ws_idx| {
+                self.workspaces
+                    .get(ws_idx)
+                    .map(|ws| (ws_idx, ws.active_tab_index()))
+            })
+            .is_some_and(|(ws_idx, tab_idx)| self.close_tab_would_close_workspace(ws_idx, tab_idx));
         if should_close_workspace {
             if let Some(active) = self.active {
                 self.selected = active;
@@ -3295,7 +3339,6 @@ impl AppState {
 
     fn handle_pane_died(&mut self, pane_id: PaneId) {
         self.pending_agent_notifications.remove(&pane_id);
-        self.remove_plugin_pane_records([pane_id]);
         let ws_idx = self
             .workspaces
             .iter()
@@ -3305,6 +3348,8 @@ impl AppState {
             warn!(pane = pane_id.raw(), "PaneDied for unknown pane");
             return;
         };
+        let should_close_workspace = self.close_pane_would_close_workspace(ws_idx, pane_id);
+        self.remove_plugin_pane_records([pane_id]);
 
         if self
             .selection
@@ -3320,13 +3365,15 @@ impl AppState {
         self.pane_id_aliases.retain(|_, alias| *alias != pane_id);
         self.public_pane_id_aliases
             .retain(|_, alias| *alias != pane_id);
-        let should_close_workspace = {
+        let should_close_workspace = should_close_workspace || {
             let ws = &mut self.workspaces[ws_idx];
             ws.remove_pane(pane_id)
         };
         self.mark_session_dirty();
 
         if should_close_workspace {
+            let pane_ids = self.pane_ids_for_workspace(ws_idx);
+            self.remove_plugin_pane_records(pane_ids);
             let active_workspace_id = self
                 .active
                 .and_then(|idx| self.workspaces.get(idx))

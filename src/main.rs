@@ -343,6 +343,22 @@ const DEFAULT_CONFIG: &str = r##"# shepherd configuration
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
 # accent = "cyan"
 
+# Desktop-only workspace header. Each inner array renders as one nonempty row.
+# Uses Agent-row built-ins plus $name pane/workspace metadata tokens and inline styles.
+[ui.topbar]
+enabled = false
+rows = [["workspace"]]
+
+# Desktop-only workspace plugin dock. Enabling it does not start a pane;
+# choose an eligible dock pane explicitly from Settings > Display.
+[ui.dock]
+enabled = false
+# Place the dock along the "bottom" or "right" edge.
+side = "bottom"
+# Bottom height or right-side width in cells. Must be at least 3 and is bounded
+# at render time so the main workspace retains at least one row or column.
+size = 10
+
 # Background notification popup delivery
 [ui.toast]
 # off = disable pop-up notifications
@@ -912,5 +928,17 @@ mod tests {
         assert!(NESTED_SHEPHERD_MESSAGES
             .iter()
             .all(|message| !message.starts_with("shepherd:")));
+    }
+
+    #[test]
+    fn default_config_contains_disabled_configurable_chrome_examples() {
+        let config: config::Config = toml::from_str(DEFAULT_CONFIG).unwrap();
+
+        assert!(!config.ui.topbar.enabled);
+        assert_eq!(config.ui.topbar.rows.len(), 1);
+        assert!(!config.ui.dock.enabled);
+        assert!(matches!(config.ui.dock.side, config::DockSide::Bottom));
+        assert_eq!(config.ui.dock.size, 10);
+        assert!(DEFAULT_CONFIG.contains("Settings > Display"));
     }
 }

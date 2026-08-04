@@ -24,7 +24,7 @@ impl App {
 
         let content = std::fs::read_to_string(&path).unwrap_or_default();
         let new_content = update(&content);
-        if let Err(err) = std::fs::write(&path, new_content) {
+        if let Err(err) = crate::persist::atomic_write_config(&path, new_content.as_bytes()) {
             crate::logging::config_write_failed(&path, error_context, &err.to_string());
             self.state.config_diagnostic = Some(format!("failed to save {error_context}: {err}"));
             self.config_diagnostic_deadline =
@@ -92,6 +92,46 @@ impl App {
         }
     }
 
+    pub(super) fn save_topbar_enabled(&mut self, enabled: bool) {
+        if self.update_config_file("topbar setting", |content| {
+            crate::config::upsert_section_bool(content, "ui.topbar", "enabled", enabled)
+        }) {
+            self.apply_config_from_disk(false);
+        }
+    }
+
+    pub(super) fn save_dock_enabled(&mut self, enabled: bool) {
+        if self.update_config_file("dock setting", |content| {
+            crate::config::upsert_section_bool(content, "ui.dock", "enabled", enabled)
+        }) {
+            self.apply_config_from_disk(false);
+            if !enabled {
+                self.state.dock_focus = None;
+            }
+        }
+    }
+
+    pub(super) fn save_dock_side(&mut self, side: crate::config::DockSide) {
+        let value = match side {
+            crate::config::DockSide::Bottom => "\"bottom\"",
+            crate::config::DockSide::Right => "\"right\"",
+        };
+        if self.update_config_file("dock side", |content| {
+            crate::config::upsert_section_value(content, "ui.dock", "side", value)
+        }) {
+            self.apply_config_from_disk(false);
+        }
+    }
+
+    pub(super) fn save_dock_size(&mut self, size: u16) {
+        let size = size.max(crate::config::MIN_DOCK_SIZE);
+        if self.update_config_file("dock size", |content| {
+            crate::config::upsert_section_value(content, "ui.dock", "size", &size.to_string())
+        }) {
+            self.apply_config_from_disk(false);
+        }
+    }
+
     pub(super) fn save_pane_history_persistence(&mut self, enabled: bool) {
         if self.update_config_file("pane screen history", |content| {
             crate::config::upsert_section_bool(content, "experimental", "pane_history", enabled)
@@ -132,5 +172,79 @@ impl App {
         }) {
             self.apply_config_from_disk(false);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_save_is_atomic_comment_preserving_and_live() {
+        let _guard = crate::config::test_config_env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let path = std::env::temp_dir().join(format!(
+            "shepherd-settings-save-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::write(
+            &path,
+            concat!(
+                "# user preface\n",
+                "[ui]\n",
+                "mouse_capture = false\n",
+                "show_agent_labels_on_pane_borders = false # keep label note\n",
+                "\n",
+                "[ui.topbar] # keep topbar note\n",
+                "enabled = false\n",
+                "\n",
+                "[ui.dock] # keep dock note\n",
+                "enabled = false\n",
+                "side = \"bottom\"\n",
+                "size = 10\n",
+            ),
+        )
+        .unwrap();
+        let previous = std::env::var_os(crate::config::CONFIG_PATH_ENV_VAR);
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.save_agent_border_labels(true);
+        app.save_topbar_enabled(true);
+        app.save_dock_enabled(true);
+        app.save_dock_side(crate::config::DockSide::Right);
+        app.save_dock_size(7);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("# user preface"));
+        assert!(content.contains("mouse_capture = false"));
+        assert!(content.contains("show_agent_labels_on_pane_borders = true # keep label note"));
+        assert!(content.contains("[ui.topbar] # keep topbar note\nenabled = true"));
+        assert!(content.contains("[ui.dock] # keep dock note\nenabled = true"));
+        assert!(content.contains("side = \"right\""));
+        assert!(content.contains("size = 7"));
+        assert!(app.state.show_agent_labels_on_pane_borders);
+        assert!(app.state.topbar_enabled);
+        assert!(app.state.dock_enabled);
+        assert_eq!(app.state.dock_side, crate::config::DockSide::Right);
+        assert_eq!(app.state.dock_size, 7);
+
+        match previous {
+            Some(value) => std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, value),
+            None => std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR),
+        }
+        let _ = std::fs::remove_file(path);
     }
 }

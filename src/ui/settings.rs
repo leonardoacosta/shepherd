@@ -138,17 +138,7 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
                 2,
             );
         }
-        SettingsSection::PaneLabels => {
-            render_settings_toggle(
-                frame,
-                content_area,
-                p,
-                "agent border labels",
-                "show detected agent names in split pane borders",
-                app.agent_border_labels_enabled(),
-                app.settings.list.selected,
-            );
-        }
+        SettingsSection::Display => render_settings_display(app, frame, content_area),
         SettingsSection::Experiments => {
             render_settings_experiments(app, frame, content_area);
         }
@@ -411,6 +401,94 @@ fn render_settings_toggle(
         p,
         1,
     );
+}
+
+fn render_settings_display(app: &AppState, frame: &mut Frame, area: Rect) {
+    let p = &app.palette;
+    let [desc_area, _, list_area] = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Length(1),
+        Constraint::Min(1),
+    ])
+    .areas::<3>(area);
+    super::widgets::render_modal_description(
+        frame,
+        desc_area,
+        "desktop chrome · enter toggles, -/+ adjusts dock size",
+        Style::default().fg(p.overlay1),
+    );
+
+    let rows = app.display_rows();
+    let start = app.display_scroll_start(list_area.height as usize);
+    for (visible_idx, row) in rows
+        .iter()
+        .skip(start)
+        .take(list_area.height as usize)
+        .enumerate()
+    {
+        let idx = start + visible_idx;
+        let selected = row.selectable && app.settings.list.selected == idx;
+        let style = if selected {
+            Style::default()
+                .bg(p.surface0)
+                .fg(p.text)
+                .add_modifier(Modifier::BOLD)
+        } else if row.selectable {
+            Style::default().fg(p.subtext0)
+        } else if row.id == crate::app::state::DisplayRowId::Diagnostic {
+            Style::default().fg(p.yellow)
+        } else {
+            Style::default().fg(p.overlay1)
+        };
+        let marker = if selected { " ▸ " } else { "   " };
+        let rect = Rect::new(
+            list_area.x,
+            list_area.y + visible_idx as u16,
+            list_area.width,
+            1,
+        );
+        frame.render_widget(
+            Paragraph::new(format!("{marker}{}", row.label)).style(style),
+            rect,
+        );
+    }
+}
+
+pub(crate) fn display_size_delta_at(
+    content_area: Rect,
+    column: u16,
+    row: u16,
+    scroll_start: usize,
+    row_idx: usize,
+    dock_size: u16,
+) -> Option<i8> {
+    let visible_idx = row_idx.checked_sub(scroll_start)?;
+    let expected_row = content_area.y.saturating_add(3 + visible_idx as u16);
+    if row != expected_row {
+        return None;
+    }
+    // Display rows use a three-cell selection marker before their label.
+    let label_x = content_area.x.saturating_add(3);
+    let minus = Rect::new(
+        label_x.saturating_add("dock size: ".len() as u16),
+        row,
+        3,
+        1,
+    );
+    let plus_x = minus
+        .x
+        .saturating_add(3)
+        .saturating_add(1)
+        .saturating_add(dock_size.to_string().len() as u16)
+        .saturating_add(1);
+    let plus = Rect::new(plus_x, row, 3, 1);
+    if column >= minus.x && column < minus.x.saturating_add(minus.width) {
+        Some(-1)
+    } else if column >= plus.x && column < plus.x.saturating_add(plus.width) {
+        Some(1)
+    } else {
+        None
+    }
 }
 
 fn render_settings_experiments(app: &AppState, frame: &mut Frame, area: Rect) {

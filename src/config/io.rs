@@ -537,7 +537,7 @@ pub(crate) fn upsert_top_level_bool(content: &str, key: &str, value: bool) -> St
 
     for line in &mut lines {
         let trimmed = line.trim();
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+        if toml_table_header_name(trimmed).is_some() {
             in_section = true;
             continue;
         }
@@ -545,7 +545,7 @@ pub(crate) fn upsert_top_level_bool(content: &str, key: &str, value: bool) -> St
             continue;
         }
         if trimmed.starts_with(&format!("{key} ")) || trimmed.starts_with(&format!("{key}=")) {
-            *line = replacement.clone();
+            *line = replacement_preserving_comment(line, &replacement);
             return lines.join("\n") + "\n";
         }
     }
@@ -567,7 +567,6 @@ pub fn upsert_section_bool(content: &str, section: &str, key: &str, value: bool)
 }
 
 pub fn remove_section_key(content: &str, section: &str, key: &str) -> String {
-    let header = format!("[{section}]");
     let lines: Vec<&str> = content.lines().collect();
     let mut result = Vec::new();
     let mut i = 0;
@@ -577,8 +576,8 @@ pub fn remove_section_key(content: &str, section: &str, key: &str) -> String {
         let line = lines[i];
         let trimmed = line.trim();
 
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            in_section = trimmed == header;
+        if let Some(table_name) = toml_table_header_name(trimmed) {
+            in_section = table_name == section;
             result.push(line.to_string());
             i += 1;
             continue;
@@ -630,16 +629,18 @@ pub fn remove_keybinding_config_sections(content: &str) -> (String, bool) {
 }
 
 fn toml_table_header_name(trimmed: &str) -> Option<&str> {
-    if let Some(name) = trimmed
-        .strip_prefix("[[")
-        .and_then(|value| value.strip_suffix("]]"))
-    {
-        return Some(name.trim());
+    if let Some(value) = trimmed.strip_prefix("[[") {
+        let end = value.find("]]")?;
+        let suffix = value[end + 2..].trim();
+        if suffix.is_empty() || suffix.starts_with('#') {
+            return Some(value[..end].trim());
+        }
+        return None;
     }
-    trimmed
-        .strip_prefix('[')
-        .and_then(|value| value.strip_suffix(']'))
-        .map(str::trim)
+    let value = trimmed.strip_prefix('[')?;
+    let end = value.find(']')?;
+    let suffix = value[end + 1..].trim();
+    (suffix.is_empty() || suffix.starts_with('#')).then(|| value[..end].trim())
 }
 
 fn is_keys_table_name(name: &str) -> bool {
@@ -648,6 +649,31 @@ fn is_keys_table_name(name: &str) -> bool {
 
 fn is_top_level_keys_assignment(trimmed: &str) -> bool {
     trimmed.starts_with("keys ") || trimmed.starts_with("keys=") || trimmed.starts_with("keys.")
+}
+
+fn replacement_preserving_comment(original: &str, replacement: &str) -> String {
+    let indent_len = original.len().saturating_sub(original.trim_start().len());
+    let indent = &original[..indent_len];
+    let mut quote = None;
+    let mut escaped = false;
+    let comment = original.char_indices().find_map(|(idx, ch)| {
+        if escaped {
+            escaped = false;
+            return None;
+        }
+        match (quote, ch) {
+            (Some('"'), '\\') => escaped = true,
+            (Some(active), current) if active == current => quote = None,
+            (None, '\'' | '"') => quote = Some(ch),
+            (None, '#') => return Some(original[idx..].trim_start()),
+            _ => {}
+        }
+        None
+    });
+    match comment {
+        Some(comment) => format!("{indent}{replacement} {comment}"),
+        None => format!("{indent}{replacement}"),
+    }
 }
 
 fn upsert_section_raw(content: &str, section: &str, key: &str, value: &str) -> String {
@@ -663,7 +689,7 @@ fn upsert_section_raw(content: &str, section: &str, key: &str, value: &str) -> S
         let line = lines[i];
         let trimmed = line.trim();
 
-        if trimmed == header {
+        if toml_table_header_name(trimmed) == Some(section) {
             found_section = true;
             result.push(line.to_string());
             i += 1;
@@ -671,7 +697,7 @@ fn upsert_section_raw(content: &str, section: &str, key: &str, value: &str) -> S
             while i < lines.len() {
                 let current = lines[i];
                 let current_trimmed = current.trim();
-                if current_trimmed.starts_with('[') && current_trimmed.ends_with(']') {
+                if toml_table_header_name(current_trimmed).is_some() {
                     if !inserted {
                         result.push(assignment.clone());
                         inserted = true;
@@ -682,7 +708,7 @@ fn upsert_section_raw(content: &str, section: &str, key: &str, value: &str) -> S
                 if current_trimmed.starts_with(&format!("{key} "))
                     || current_trimmed.starts_with(&format!("{key}="))
                 {
-                    result.push(assignment.clone());
+                    result.push(replacement_preserving_comment(current, &assignment));
                     inserted = true;
                 } else {
                     result.push(current.to_string());
@@ -821,6 +847,28 @@ mod tests {
         let updated = upsert_section_bool("", "ui.toast", "enabled", true);
         assert!(updated.contains("[ui.toast]"));
         assert!(updated.contains("enabled = true"));
+    }
+
+    #[test]
+    fn upsert_section_preserves_header_comment_and_unrelated_text() {
+        let content = concat!(
+            "# keep me\n",
+            "[ui.dock] # user note\n",
+            "enabled = false # old value\n",
+            "side = \"right\"\n",
+            "\n",
+            "[ui.sound]\n",
+            "enabled = true\n",
+        );
+
+        let updated = upsert_section_bool(content, "ui.dock", "enabled", true);
+
+        assert!(
+            updated.contains("[ui.dock] # user note\nenabled = true # old value\nside = \"right\"")
+        );
+        assert!(updated.contains("# keep me"));
+        assert!(updated.contains("[ui.sound]\nenabled = true"));
+        assert_eq!(updated.matches("[ui.dock]").count(), 1);
     }
 
     #[test]

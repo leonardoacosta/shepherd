@@ -1,4 +1,4 @@
-mod tokens;
+pub(super) mod tokens;
 
 use std::borrow::Cow;
 
@@ -153,10 +153,12 @@ fn collect_agent_panel_entries_with_runtimes(
         .iter()
         .enumerate()
         .flat_map(|(ws_idx, ws)| {
-            let multi_tab = ws.tabs.len() > 1;
+            let dock_tab_idx = app.dock_backing_tab_idx(ws_idx);
+            let multi_tab = app.visible_tab_indices(ws_idx).len() > 1;
             let workspace_label = ws.display_name_from(&app.terminals, terminal_runtimes);
             ws.pane_details(&app.terminals)
                 .into_iter()
+                .filter(move |detail| Some(detail.tab_idx) != dock_tab_idx)
                 .map(move |detail| {
                     let show_tab = multi_tab
                         || ws
@@ -1079,7 +1081,7 @@ pub(super) fn render_sidebar(
     render_sidebar_toggle(app, frame, area, false, p);
 }
 
-fn resolved_token_spans(
+pub(super) fn resolved_token_spans(
     resolved: &[ResolvedToken],
     state_icon: (&str, Style),
     state_text_style: Style,

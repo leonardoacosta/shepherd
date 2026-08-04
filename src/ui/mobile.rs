@@ -182,15 +182,19 @@ pub(crate) fn mobile_switcher_target_at(
     }
     cursor = spaces_end;
 
-    if let Some(ws) = app.active.and_then(|idx| app.workspaces.get(idx)) {
+    if let Some(ws_idx) = app.active {
+        let visible_tabs = app.visible_tab_indices(ws_idx);
         cursor += 1; // tabs title
         if doc_row == cursor {
             return Some(MobileSwitcherTarget::NewTab);
         }
         cursor += 1;
-        let tabs_end = cursor + ws.tabs.len();
+        let tabs_end = cursor + visible_tabs.len();
         if doc_row >= cursor && doc_row < tabs_end {
-            return Some(MobileSwitcherTarget::Tab(doc_row - cursor));
+            return visible_tabs
+                .get(doc_row - cursor)
+                .copied()
+                .map(MobileSwitcherTarget::Tab);
         }
         cursor = tabs_end;
     }
@@ -320,14 +324,17 @@ fn render_header_status(
         return;
     }
     let p = &app.palette;
-    let Some(ws) = app.active.and_then(|idx| app.workspaces.get(idx)) else {
+    let Some(ws_idx) = app.active else {
         frame.render_widget(Paragraph::new(" no workspace"), area);
+        return;
+    };
+    let Some(ws) = app.workspaces.get(ws_idx) else {
         return;
     };
 
     let (state, seen) = ws.aggregate_state(&app.terminals);
     let (dot, dot_style) = state_dot(state, seen, p);
-    let tab_label = mobile_tab_status(ws);
+    let tab_label = mobile_tab_status(app, ws_idx, ws);
     let row1 = Rect::new(area.x, area.y, area.width, 1);
     let tab_w = display_width_u16(&tab_label)
         .saturating_add(1)
@@ -367,14 +374,19 @@ fn render_header_status(
     }
 }
 
-fn mobile_tab_status(ws: &crate::workspace::Workspace) -> String {
+fn mobile_tab_status(app: &AppState, ws_idx: usize, ws: &crate::workspace::Workspace) -> String {
     let tab_label = ws
         .tab_display_name(ws.active_tab)
         .unwrap_or_else(|| (ws.active_tab + 1).to_string());
-    if ws.tabs.len() <= 1 {
+    let visible = app.visible_tab_indices(ws_idx);
+    if visible.len() <= 1 {
         format!("tab {tab_label}")
     } else {
-        format!("tab {tab_label} · {}/{}", ws.active_tab + 1, ws.tabs.len())
+        let position = visible
+            .iter()
+            .position(|tab_idx| *tab_idx == ws.active_tab)
+            .unwrap_or(0);
+        format!("tab {tab_label} · {}/{}", position + 1, visible.len())
     }
 }
 
@@ -455,8 +467,7 @@ fn mobile_switcher_content_height(app: &AppState) -> usize {
     let spaces_h = 2 + workspace_list_entries_expanded(app).len() * 2;
     let tabs_h = app
         .active
-        .and_then(|idx| app.workspaces.get(idx))
-        .map(|ws| 2 + ws.tabs.len())
+        .map(|ws_idx| 2 + app.visible_tab_indices(ws_idx).len())
         .unwrap_or(0);
     let agents_h = mobile_agents_block_height(app);
     let menu_h = 1 + app.global_menu_labels().len();
@@ -640,7 +651,7 @@ fn render_mobile_switcher_content(
         let detail = format!(
             "{detail_prefix}{} · {}",
             ws.branch().unwrap_or_else(|| "shell".into()),
-            mobile_tab_status(ws)
+            mobile_tab_status(app, *ws_idx, ws)
         );
         render_two_line_item(
             frame,
@@ -656,7 +667,8 @@ fn render_mobile_switcher_content(
         doc_y += 2;
     }
 
-    if let Some(ws) = app.active.and_then(|idx| app.workspaces.get(idx)) {
+    if let Some(ws_idx) = app.active {
+        let ws = &app.workspaces[ws_idx];
         render_section_title_at(
             frame,
             viewport,
@@ -677,7 +689,8 @@ fn render_mobile_switcher_content(
             p,
         );
         doc_y += 1;
-        for (idx, tab) in ws.tabs.iter().enumerate() {
+        for (visible_idx, idx) in app.visible_tab_indices(ws_idx).into_iter().enumerate() {
+            let tab = &ws.tabs[idx];
             let active = idx == ws.active_tab;
             let bg = mobile_item_bg(false, active, p);
             let display_name = ws
@@ -686,7 +699,7 @@ fn render_mobile_switcher_content(
             let label = if tab.is_auto_named() {
                 format!("tab {display_name}")
             } else {
-                format!("{} · {display_name}", idx + 1)
+                format!("{} · {display_name}", visible_idx + 1)
             };
             let title = Line::from(vec![
                 Span::styled("  ", Style::default().bg(bg)),
@@ -1393,8 +1406,14 @@ mod tests {
         workspace.test_add_tab(None);
         assert!(workspace.close_tab(removed_tab));
         workspace.active_tab = 1;
+        let mut app = AppState::test_new();
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
 
-        assert_eq!(mobile_tab_status(&workspace), "tab 2 · 2/2");
+        assert_eq!(
+            mobile_tab_status(&app, 0, &app.workspaces[0]),
+            "tab 2 · 2/2"
+        );
     }
 
     #[test]

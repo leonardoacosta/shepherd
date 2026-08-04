@@ -239,13 +239,12 @@ impl App {
                 }
             }
             NavigateAction::SwitchTab(idx) => {
-                if self
+                if let Some(tab_idx) = self
                     .state
                     .active
-                    .and_then(|ws_idx| self.state.workspaces.get(ws_idx))
-                    .is_some_and(|ws| idx < ws.tabs.len())
+                    .and_then(|ws_idx| self.state.visible_tab_indices(ws_idx).get(idx).copied())
                 {
-                    self.focus_tab_idx_via_api(idx);
+                    self.focus_tab_idx_via_api(tab_idx);
                     leave_navigate_mode(&mut self.state);
                 }
             }
@@ -418,6 +417,7 @@ impl App {
     }
 
     pub(crate) fn focus_workspace_idx_via_api(&mut self, ws_idx: usize) {
+        self.state.dock_focus = None;
         let workspace_id = self.public_workspace_id(ws_idx);
         self.runtime_workspace_focus("tui.workspace.focus", workspace_id);
     }
@@ -446,6 +446,7 @@ impl App {
     }
 
     pub(crate) fn focus_tab_idx_via_api(&mut self, tab_idx: usize) {
+        self.state.dock_focus = None;
         let Some(ws_idx) = self.state.active else {
             return;
         };
@@ -459,19 +460,14 @@ impl App {
         let Some(ws_idx) = self.state.active else {
             return false;
         };
-        if self
-            .state
-            .workspaces
-            .get(ws_idx)
-            .is_some_and(|ws| ws.tabs.len() <= 1)
-        {
+        let tab_idx = self.state.workspaces[ws_idx].active_tab_index();
+        if self.state.close_tab_would_close_workspace(ws_idx, tab_idx) {
             if self.state.confirm_implicit_worktree_group_close(ws_idx) {
                 return true;
             }
             self.close_workspace_idx_via_api(ws_idx);
             return false;
         }
-        let tab_idx = self.state.workspaces[ws_idx].active_tab_index();
         let Some(tab_id) = self.public_tab_id(ws_idx, tab_idx) else {
             return false;
         };
@@ -502,6 +498,7 @@ impl App {
         ws_idx: usize,
         pane_id: crate::layout::PaneId,
     ) {
+        self.state.dock_focus = None;
         let Some(pane_id) = self.public_pane_id(ws_idx, pane_id) else {
             return;
         };
@@ -509,6 +506,7 @@ impl App {
     }
 
     pub(crate) fn focus_pane_direction_via_api(&mut self, direction: NavDirection) {
+        self.state.dock_focus = None;
         if let Some((ws_idx, target)) = self.directional_pane_target_from_view(direction) {
             self.focus_pane_internal_via_api(ws_idx, target);
             return;
@@ -707,14 +705,18 @@ impl App {
     }
 
     fn relative_tab(&self, delta: isize) -> Option<usize> {
-        let ws = self
-            .state
-            .active
-            .and_then(|ws_idx| self.state.workspaces.get(ws_idx))?;
-        if ws.tabs.is_empty() {
+        let ws_idx = self.state.active?;
+        let ws = self.state.workspaces.get(ws_idx)?;
+        let visible = self.state.visible_tab_indices(ws_idx);
+        if visible.is_empty() {
             return None;
         }
-        Some((ws.active_tab as isize + delta).rem_euclid(ws.tabs.len() as isize) as usize)
+        let current = visible
+            .iter()
+            .position(|tab_idx| *tab_idx == ws.active_tab)
+            .unwrap_or(0);
+        let next = (current as isize + delta).rem_euclid(visible.len() as isize) as usize;
+        visible.get(next).copied()
     }
 
     fn agent_entry_target(&self, idx: usize) -> Option<(usize, crate::layout::PaneId)> {
@@ -1612,12 +1614,11 @@ pub(super) fn execute_navigate_action_in_context(
             }
         }
         NavigateAction::SwitchTab(idx) => {
-            let tab_exists = state
+            let tab_idx = state
                 .active
-                .and_then(|ws_idx| state.workspaces.get(ws_idx))
-                .is_some_and(|ws| idx < ws.tabs.len());
-            if tab_exists {
-                state.switch_tab(idx);
+                .and_then(|ws_idx| state.visible_tab_indices(ws_idx).get(idx).copied());
+            if let Some(tab_idx) = tab_idx {
+                state.switch_tab(tab_idx);
                 leave_navigate_mode(state);
             }
         }
@@ -3418,6 +3419,33 @@ navigate_pane_down = "ctrl+j"
         );
 
         assert_eq!(state.mode, Mode::KeybindHelp);
+    }
+
+    #[test]
+    fn tab_navigation_skips_managed_dock_backing_identity() {
+        let mut state = state_with_workspaces(&["tabs"]);
+        let second = state.workspaces[0].test_add_tab(Some("second"));
+        let dock = state.workspaces[0].test_add_tab(Some("dock-backing"));
+        let fourth = state.workspaces[0].test_add_tab(Some("fourth"));
+        let dock_pane = state.workspaces[0].tabs[dock].root_pane;
+        state
+            .reserve_dock_pane(0, dock_pane)
+            .expect("dock reservation");
+        state.workspaces[0].switch_tab(0);
+
+        state.next_tab();
+        assert_eq!(state.workspaces[0].active_tab, second);
+        state.next_tab();
+        assert_eq!(state.workspaces[0].active_tab, fourth);
+        state.next_tab();
+        assert_eq!(state.workspaces[0].active_tab, 0);
+        state.previous_tab();
+        assert_eq!(state.workspaces[0].active_tab, fourth);
+
+        state.mode = Mode::Navigate;
+        execute_navigate_action(&mut state, NavigateAction::SwitchTab(1));
+        assert_eq!(state.workspaces[0].active_tab, second);
+        assert_ne!(state.workspaces[0].active_tab, dock);
     }
 
     #[test]
