@@ -69,12 +69,15 @@ type). Tasks 3.5-3.9 are the exception that decision carves out — Shepherd abs
 
 ## 5. Absorb the pure derivations
 
-- [ ] 5.1 Port `pkg/pricing`'s rate table and cost computation as a pure derivation over
+- [x] 5.1 Port `pkg/pricing`'s rate table and cost computation as a pure derivation over
       already-cached token counts. It reads no source and gets no adapter.
-- [ ] 5.2 Port `pkg/severity`'s six-tier classification and handoff threshold the same way.
-- [ ] 5.3 Port the companion's existing tests for both rather than writing new ones, so a
+      `src/workspace/session_pricing.rs`. Not yet wired into a token (task 6.3).
+- [x] 5.2 Port `pkg/severity`'s six-tier classification and handoff threshold the same way.
+      `src/workspace/session_severity.rs`. Not yet wired into a token (task 6.3).
+- [x] 5.3 Port the companion's existing tests for both rather than writing new ones, so a
       divergence in tiers or rates is caught as a diff.
-- [ ] 5.4 Run `cargo nextest run pricing severity` and paste the passing output.
+- [x] 5.4 Run `cargo nextest run pricing severity` and paste the passing output. 9 tests run: 9
+      passed, 0 failed (2026-08-05).
 
 ## 6. Expose the vocabulary
 

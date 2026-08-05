@@ -17,6 +17,8 @@ use crate::terminal::{TerminalId, TerminalRuntime, TerminalRuntimeRegistry, Term
 mod aggregate;
 mod git;
 mod project_status;
+mod session_pricing;
+mod session_severity;
 mod session_status;
 mod tab;
 
