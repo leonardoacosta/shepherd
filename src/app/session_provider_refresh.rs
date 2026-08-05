@@ -16,9 +16,10 @@ use super::provider::run_provider;
 use super::{App, SESSION_STATUS_REFRESH_INTERVAL};
 use crate::events::AppEvent;
 use crate::workspace::{
-    merge_persisted_sessions, parse_context_floor_status, parse_llmtrim_status,
-    parse_persisted_session_record, ContextFloorStatus, LlmTrimStatus, SessionStatusRefreshDemand,
-    SessionStatusSnapshot, SessionsStatus, WorkspaceSessionStatus,
+    merge_persisted_sessions, munge_claude_path, parse_context_floor_status, parse_llmtrim_status,
+    parse_persisted_session_record, parse_transcript_usage, ContextFloorStatus, LlmTrimStatus,
+    SessionStatusRefreshDemand, SessionStatusSnapshot, SessionsStatus, TranscriptUsage,
+    WorkspaceSessionStatus,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -273,6 +274,54 @@ fn walk_session_store(dir: &Path, records: &mut Vec<crate::workspace::PersistedS
             records.push(record);
         }
     }
+}
+
+/// `~/.claude/projects` — the Claude Code transcript root. A function (not a constant) so a
+/// future test can override it the same way the companion's `claudeProjectsRoot` package var
+/// does; unlike that var this is not yet exercised by a test since task 4.2 lands the adapter
+/// function ahead of its refresh-loop wiring (task 6's per-session keying change — see
+/// `openspec/changes/session-provider-adapters/tasks.md` task 4.2's note).
+fn default_claude_projects_root() -> Option<PathBuf> {
+    dirs_home().map(|home| home.join(".claude/projects"))
+}
+
+/// Locates a Claude Code session's transcript file. The munged-cwd path is tried first; if it
+/// misses (e.g. the pane's cwd changed after the session launched), falls back to globbing
+/// every project dir for `<session_id>.jsonl` — session UUIDs are unique. Mirrors
+/// `ResolveSessionPath` exactly, including the munged-path-first-then-glob-fallback order.
+fn resolve_transcript_session_path(session_id: &str, cwd: &str) -> Option<PathBuf> {
+    if session_id.is_empty() {
+        return None;
+    }
+    let root = default_claude_projects_root()?;
+    if !cwd.is_empty() {
+        let munged = root
+            .join(munge_claude_path(cwd))
+            .join(format!("{session_id}.jsonl"));
+        if munged.is_file() {
+            return Some(munged);
+        }
+    }
+    let entries = std::fs::read_dir(&root).ok()?;
+    for entry in entries.flatten() {
+        let candidate = entry.path().join(format!("{session_id}.jsonl"));
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Reads and parses a Claude Code session's transcript. Not yet called from
+/// `session_status_for_checkout` — transcript usage is keyed by (checkout, session id), not by
+/// checkout alone like every other source here, so wiring it into demand/the snapshot needs the
+/// refresh-loop's per-session-item restructuring task 6 does alongside the vocabulary wiring
+/// (tasks.md task 4.2's note). `dead_code` is allowed on this one function until that lands.
+#[allow(dead_code)]
+fn transcript_usage_for_session(session_id: &str, cwd: &str) -> Option<TranscriptUsage> {
+    let path = resolve_transcript_session_path(session_id, cwd)?;
+    let contents = std::fs::read_to_string(path).ok()?;
+    Some(parse_transcript_usage(&contents))
 }
 
 #[cfg(test)]

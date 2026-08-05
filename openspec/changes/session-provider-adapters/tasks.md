@@ -60,12 +60,23 @@ type). Tasks 3.5-3.9 are the exception that decision carves out — Shepherd abs
 
 ## 4. Absorb the transcript reader
 
-- [ ] 4.1 Port `pkg/transcript`'s session-path resolution and `.jsonl` usage parsing into pure
+- [x] 4.1 Port `pkg/transcript`'s session-path resolution and `.jsonl` usage parsing into pure
       functions, with the path-munging rules preserved exactly.
-- [ ] 4.2 Add the adapter, its demand disjunct, and its snapshot field.
-- [ ] 4.3 Add parser tests over captured transcript bodies, including a truncated final line, which
+      `src/workspace/session_transcript.rs` (`munge_claude_path`, `parse_transcript_usage`,
+      pure); `resolve_transcript_session_path` (I/O: stat + glob fallback) in
+      `src/app/session_provider_refresh.rs`.
+- [ ] 4.2 Add the adapter, its demand disjunct, and its snapshot field. The adapter function
+      (`transcript_usage_for_session`) is landed but not yet called: transcript usage is keyed
+      by (checkout, session id), not by checkout alone like every other source in
+      `SessionStatusRefreshDemand`/`SessionStatusSnapshot` — wiring its demand disjunct and
+      snapshot field needs the refresh-loop's per-session-item restructuring, which task 6 does
+      alongside the vocabulary wiring rather than churning `SessionStatusRefreshItem`'s shape
+      twice. `#[allow(dead_code)]` marks the one still-unreferenced function.
+- [x] 4.3 Add parser tests over captured transcript bodies, including a truncated final line, which
       a live transcript exhibits while a session is running.
-- [ ] 4.4 Run `cargo nextest run transcript` and paste the passing output.
+- [x] 4.4 Run `cargo nextest run transcript` and paste the passing output. 10 tests run: 10
+      passed, 0 failed (2026-08-05) — 9 new `session_transcript` tests plus one pre-existing
+      unrelated match.
 
 ## 5. Absorb the pure derivations
 
