@@ -1211,6 +1211,10 @@ pub(crate) enum BehaviorRowId {
     PromptNewWorkspaceName,
     CopyOnSelect,
     ScrollLines,
+    /// Advanced action row (not a toggle): opens `config.toml` in the user's
+    /// editor via `server.config.edit`, the same operation remote API
+    /// clients use.
+    AdvancedConfigEditor,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1726,6 +1730,10 @@ pub struct AppState {
     pub latest_release_notes_available: bool,
     pub update_dismissed: bool,
     pub config_diagnostic: Option<String>,
+    /// Bounded outcome/diagnostics from the last `server.config.edit`
+    /// completion, rendered locally by Settings (`server.config_edit_finished`
+    /// is the remote-facing equivalent).
+    pub(crate) config_editor_last_result: Option<crate::app::config_editor::ConfigEditorLastResult>,
     pub toast: Option<ToastNotification>,
     pub pending_agent_notifications: std::collections::HashMap<PaneId, PendingAgentNotification>,
     pub copy_feedback: Option<CopyFeedback>,
@@ -2118,7 +2126,42 @@ impl AppState {
                 id: BehaviorRowId::ScrollLines,
                 label: format!("mouse scroll lines: [-] {} [+]", self.mouse_scroll_lines),
             },
+            BehaviorRow {
+                id: BehaviorRowId::AdvancedConfigEditor,
+                label: self.advanced_config_editor_row_label(),
+            },
         ]
+    }
+
+    /// Bounded status for the Settings advanced-editor row: the immediate
+    /// reopen path is just re-triggering this same row, so the label only
+    /// needs the single most recent outcome, not a history.
+    fn advanced_config_editor_row_label(&self) -> String {
+        const BASE: &str = "edit config.toml directly";
+        const MAX_DIAGNOSTIC_CHARS: usize = 60;
+
+        let Some(result) = &self.config_editor_last_result else {
+            return BASE.to_string();
+        };
+        let status = match result.outcome {
+            crate::api::schema::ConfigEditOutcome::Unchanged => "no changes".to_string(),
+            crate::api::schema::ConfigEditOutcome::Reloaded => "reloaded".to_string(),
+            crate::api::schema::ConfigEditOutcome::EditorFailed => {
+                "editor exited unsuccessfully".to_string()
+            }
+            crate::api::schema::ConfigEditOutcome::Invalid => match result.diagnostics.first() {
+                Some(diagnostic) => {
+                    let truncated: String = diagnostic.chars().take(MAX_DIAGNOSTIC_CHARS).collect();
+                    if truncated.len() < diagnostic.len() {
+                        format!("invalid: {truncated}…")
+                    } else {
+                        format!("invalid: {truncated}")
+                    }
+                }
+                None => "invalid".to_string(),
+            },
+        };
+        format!("{BASE} — {status}")
     }
 
     /// Every Behavior row is selectable, so normalization only needs to clamp
@@ -2530,6 +2573,7 @@ impl AppState {
             latest_release_notes_available: false,
             update_dismissed: false,
             config_diagnostic: None,
+            config_editor_last_result: None,
             toast: None,
             pending_agent_notifications: std::collections::HashMap::new(),
             copy_feedback: None,

@@ -19,6 +19,12 @@ impl TerminalRuntime {
         self.0.shutdown();
     }
 
+    /// The owned child's exit status, once known. `None` before exit or when
+    /// this pane has no owned child to wait on (e.g. an imported handoff PTY).
+    pub(crate) fn last_exit_success(&self) -> Option<bool> {
+        self.0.last_exit_success()
+    }
+
     #[cfg(unix)]
     pub fn duplicate_handoff_fd(&self) -> std::io::Result<std::os::fd::RawFd> {
         self.0.duplicate_handoff_fd()

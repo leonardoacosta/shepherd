@@ -44,6 +44,12 @@ pub(crate) fn scrollback_editor_argv(path: &Path) -> std::io::Result<Vec<String>
     Ok(vec!["/bin/sh".to_string(), "-c".to_string(), command])
 }
 
+/// Config editor argv: unlike `scrollback_editor_argv`, this never wraps in a
+/// shell or deletes its input file — the config file is the user's real config.
+pub(crate) fn config_editor_argv(path: &Path) -> std::io::Result<Vec<String>> {
+    super::unix_config_editor_argv(path)
+}
+
 pub(crate) fn interactive_shell_command(argv: &[String], shell_name: &str) -> Option<String> {
     super::interactive_unix_shell_command(argv, shell_name, shell_quote)
 }
@@ -1206,5 +1212,29 @@ printf '%s\n' "$@" > "$SHEPHERD_NOTIFY_ARGS"
         assert_eq!(argv[1], "-c");
         assert!(argv[2].contains("EDITOR:-vi"));
         assert!(argv[2].contains("/tmp/shepherd scrollback.txt"));
+    }
+
+    #[test]
+    fn config_editor_argv_never_wraps_in_a_deleting_shell() {
+        // Unlike scrollback_editor_argv, config_editor_argv must never spawn
+        // `/bin/sh -c ...; rm -f ...` — that would delete the real config file.
+        let previous_visual = std::env::var_os("VISUAL");
+        let previous_editor = std::env::var_os("EDITOR");
+        std::env::set_var("VISUAL", "vim");
+        std::env::remove_var("EDITOR");
+
+        let path = std::path::Path::new("/tmp/shepherd config.toml");
+        let argv = config_editor_argv(path).unwrap();
+
+        match previous_visual {
+            Some(value) => std::env::set_var("VISUAL", value),
+            None => std::env::remove_var("VISUAL"),
+        }
+        match previous_editor {
+            Some(value) => std::env::set_var("EDITOR", value),
+            None => std::env::remove_var("EDITOR"),
+        }
+
+        assert_eq!(argv, vec!["vim".to_string(), path.display().to_string()]);
     }
 }

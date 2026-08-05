@@ -28,6 +28,10 @@ export type Request = {
       params: EmptyParams;
     }
   | {
+      method: 'server.config.edit';
+      params: EmptyParams;
+    }
+  | {
       method: 'notification.show';
       params: NotificationShowParams;
     }

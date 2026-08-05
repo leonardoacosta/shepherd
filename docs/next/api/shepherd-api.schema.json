@@ -162,6 +162,31 @@
           ],
           "type": "string"
         },
+        "ConfigEditOutcome": {
+          "description": "Terminal outcome of a `server.config.edit` operation, reported both in the\n`server.config_edit_finished` completion event and (bounded) in Settings.",
+          "oneOf": [
+            {
+              "const": "unchanged",
+              "description": "The editor exited without changing the resolved config file.",
+              "type": "string"
+            },
+            {
+              "const": "reloaded",
+              "description": "The file changed and the new bytes were valid TOML; runtime config reloaded.",
+              "type": "string"
+            },
+            {
+              "const": "invalid",
+              "description": "The file changed but the new bytes were invalid or unreadable; the last\nvalid runtime configuration remains active.",
+              "type": "string"
+            },
+            {
+              "const": "editor_failed",
+              "description": "The editor process exited unsuccessfully and the file did not change.",
+              "type": "string"
+            }
+          ]
+        },
         "EventData": {
           "oneOf": [
             {
@@ -806,6 +831,37 @@
                 "layout"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "diagnostics": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "outcome": {
+                  "$ref": "#/schemas/event/$defs/ConfigEditOutcome"
+                },
+                "pane_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "server_config_edit_finished",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id",
+                "workspace_id",
+                "outcome",
+                "diagnostics"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -836,7 +892,8 @@
             "pane_exited",
             "pane_agent_detected",
             "pane_agent_status_changed",
-            "layout_updated"
+            "layout_updated",
+            "server_config_edit_finished"
           ],
           "type": "string"
         },
@@ -4130,6 +4187,18 @@
                 "type"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "server.config_edit_finished",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -4595,6 +4664,22 @@
           "properties": {
             "method": {
               "const": "server.reload_agent_manifests",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "server.config.edit",
               "type": "string"
             },
             "params": {
@@ -6551,6 +6636,31 @@
           ],
           "type": "string"
         },
+        "ConfigEditOutcome": {
+          "description": "Terminal outcome of a `server.config.edit` operation, reported both in the\n`server.config_edit_finished` completion event and (bounded) in Settings.",
+          "oneOf": [
+            {
+              "const": "unchanged",
+              "description": "The editor exited without changing the resolved config file.",
+              "type": "string"
+            },
+            {
+              "const": "reloaded",
+              "description": "The file changed and the new bytes were valid TOML; runtime config reloaded.",
+              "type": "string"
+            },
+            {
+              "const": "invalid",
+              "description": "The file changed but the new bytes were invalid or unreadable; the last\nvalid runtime configuration remains active.",
+              "type": "string"
+            },
+            {
+              "const": "editor_failed",
+              "description": "The editor process exited unsuccessfully and the file did not change.",
+              "type": "string"
+            }
+          ]
+        },
         "ConfigReloadStatus": {
           "enum": [
             "applied",
@@ -7203,6 +7313,37 @@
                 "layout"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "diagnostics": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "outcome": {
+                  "$ref": "#/schemas/success_response/$defs/ConfigEditOutcome"
+                },
+                "pane_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "server_config_edit_finished",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id",
+                "workspace_id",
+                "outcome",
+                "diagnostics"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -7248,7 +7389,8 @@
             "pane_exited",
             "pane_agent_detected",
             "pane_agent_status_changed",
-            "layout_updated"
+            "layout_updated",
+            "server_config_edit_finished"
           ],
           "type": "string"
         },
@@ -9916,6 +10058,26 @@
                 "type",
                 "status",
                 "diagnostics"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "already_open": {
+                  "type": "boolean"
+                },
+                "pane": {
+                  "$ref": "#/schemas/success_response/$defs/PaneInfo"
+                },
+                "type": {
+                  "const": "config_edit_opened",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane",
+                "already_open"
               ],
               "type": "object"
             },

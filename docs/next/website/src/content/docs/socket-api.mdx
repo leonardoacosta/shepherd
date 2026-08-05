@@ -96,7 +96,7 @@ Raw socket method names use dot notation:
 
 | Area | Methods |
 | --- | --- |
-| Server | `ping`, `server.stop`, `server.reload_config`, `server.live_handoff`, `server.agent_manifests`, `server.reload_agent_manifests` |
+| Server | `ping`, `server.stop`, `server.reload_config`, `server.live_handoff`, `server.agent_manifests`, `server.reload_agent_manifests`, `server.config.edit` |
 | Notification | `notification.show` |
 | Client | `client.window_title.set`, `client.window_title.clear` |
 | Session | `session.snapshot` |
@@ -805,6 +805,8 @@ updated `PaneLayoutSnapshot` for one tab. Clients that bootstrap with
 
 Worktree event subscriptions include `worktree.created`, `worktree.opened`, and `worktree.removed`. Worktree events describe Git checkout lifecycle. `worktree.created` includes the opened `workspace` and created `worktree`. `worktree.opened` includes the target `workspace`, opened `worktree`, and `already_open`. `worktree.removed` includes the `workspace_id`, removed `worktree`, and `forced`.
 
+The `server.config_edit_finished` subscription reports when a `server.config.edit` editor pane exits. Its event carries `pane_id`, `workspace_id`, `outcome` (`unchanged`, `reloaded`, `invalid`, or `editor_failed`), and bounded `diagnostics` strings — subscribers get exactly one event per pane per terminal outcome, and can reopen the same server-owned file immediately to correct an `invalid` edit.
+
 Use `events.subscribe` for lifecycle events. Dedicated wait helpers are documented separately when a one-shot wait is supported.
 
 ## Reading panes
@@ -879,6 +881,33 @@ Successful responses look like this:
 ```
 
 Fields such as `last_check_unix`, `last_result`, `active_version`, `cached_remote_version`, `remote_update_result`, `remote_update_error`, `remote_last_checked_unix`, and `warning` are omitted when not available. `server.reload_agent_manifests` returns `agent_manifest_reload` with the same `manifests` item shape after reloading the in-memory rule cache.
+
+`server.config.edit` opens the server's own resolved configuration file (`config.toml`) in an editor pane. It takes no parameters — the server always resolves its own path and rejects any client-supplied one by construction. A missing parent directory is created; a missing config file is never synthesized before the editor opens it.
+
+```json
+{
+  "id": "req_1",
+  "method": "server.config.edit",
+  "params": {}
+}
+```
+
+```json
+{
+  "id": "req_1",
+  "result": {
+    "type": "config_edit_opened",
+    "pane": { "pane_id": "w1:p2", "...": "..." },
+    "already_open": false
+  }
+}
+```
+
+At most one Shepherd-owned config editor pane exists per server session. A duplicate `server.config.edit` request while one is already open returns the same `pane` with `already_open: true` instead of starting a second editor; the operation continues even if the requesting client disconnects. If the server has no surface that can host a pane, the request fails with `config_editor_unavailable`.
+
+On Unix, the editor is resolved from `VISUAL`, then `EDITOR`, then `vi`; on Windows, from the same precedence falling back to Notepad, using existing safe command-line parsing. The config path is always passed as a single trailing argument, never interpolated into a shell string, and is never registered for temporary-file cleanup — exiting the editor never deletes the config file.
+
+When the editor pane exits, Shepherd compares the final bytes against the pre-edit snapshot and publishes exactly one `server.config_edit_finished` event per pane per outcome (see [Event subscriptions](#event-subscriptions)): `unchanged` when nothing changed, `reloaded` when changed bytes parsed as valid TOML (including when the editor process itself exited nonzero but left valid bytes, or when a previously-existing file was removed — Shepherd reloads defaults and never re-creates it), `invalid` when changed bytes are invalid TOML or unreadable (the last valid runtime configuration stays active and the invalid bytes are left on disk untouched), and `editor_failed` when the editor process exited nonzero without changing the file.
 
 `agent.explain` evaluates the target pane's detection snapshot in the running server using the server's active manifest cache:
 

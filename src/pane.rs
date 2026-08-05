@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::io;
 use std::path::Path;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering},
     Arc, Mutex,
 };
 
@@ -973,6 +973,11 @@ pub struct PaneRuntime {
     child_pid: Arc<AtomicU32>,
     reported_cwd: Arc<Mutex<Option<std::path::PathBuf>>>,
     child_wait_completed: Option<Arc<AtomicBool>>,
+    // Owned-child exit status, set once `child.wait()` returns; `None` when the
+    // pane has no owned child to wait on (e.g. an imported handoff PTY). Encoded
+    // as 0=pending, 1=success, 2=failure so it can live behind a plain `Arc`
+    // without a `Mutex` for the config-editor completion read path.
+    exit_status: Option<Arc<AtomicU8>>,
     kitty_keyboard_flags: Arc<AtomicU16>,
     detection_content_seq: Arc<AtomicU64>,
     full_lifecycle_authority_active: Arc<AtomicBool>,
@@ -1497,6 +1502,19 @@ fn publish_reported_cwd(
 }
 
 impl PaneRuntime {
+    /// The owned child's exit status, once known. `None` before the child has
+    /// exited or when this pane has no owned child to wait on (e.g. an
+    /// imported handoff PTY) — callers must not treat `None` as failure.
+    pub(crate) fn last_exit_success(&self) -> Option<bool> {
+        self.exit_status
+            .as_deref()
+            .and_then(|flag| match flag.load(Ordering::Acquire) {
+                1 => Some(true),
+                2 => Some(false),
+                _ => None,
+            })
+    }
+
     pub fn shutdown(mut self) {
         if let Some(handle) = self.detect_handle.take() {
             handle.abort();
@@ -1883,6 +1901,7 @@ impl PaneRuntime {
             child_pid,
             reported_cwd,
             child_wait_completed: None,
+            exit_status: None,
             kitty_keyboard_flags,
             detection_content_seq,
             full_lifecycle_authority_active,
@@ -1937,11 +1956,15 @@ impl PaneRuntime {
         let child_pid = Arc::new(AtomicU32::new(0));
         let reported_cwd = Arc::new(Mutex::new(None));
         let child_wait_completed = Arc::new(AtomicBool::new(false));
+        // 0=pending, 1=success, 2=failure — read by the config-editor completion
+        // path to distinguish a nonzero editor exit from an unchanged file.
+        let exit_status = Arc::new(AtomicU8::new(0));
         let detection_content_seq = Arc::new(AtomicU64::new(0));
         let full_lifecycle_authority_active = Arc::new(AtomicBool::new(false));
         {
             let child_pid = child_pid.clone();
             let child_wait_completed = child_wait_completed.clone();
+            let exit_status = exit_status.clone();
             let events = events.clone();
             let rt = tokio::runtime::Handle::current();
             let mut child = spawned.child;
@@ -1954,6 +1977,7 @@ impl PaneRuntime {
                     Ok(status) => {
                         let status_text = format!("{status:?}");
                         crate::logging::pane_exited(pane_id.raw(), &status_text);
+                        exit_status.store(if status.success() { 1 } else { 2 }, Ordering::Release);
                     }
                     Err(e) => crate::logging::pane_exit_failed(pane_id.raw(), &e.to_string()),
                 }
@@ -2397,6 +2421,7 @@ impl PaneRuntime {
             child_pid,
             reported_cwd,
             child_wait_completed: Some(child_wait_completed),
+            exit_status: Some(exit_status),
             kitty_keyboard_flags,
             detection_content_seq,
             full_lifecycle_authority_active,
@@ -2881,6 +2906,7 @@ impl PaneRuntime {
                 child_pid: Arc::new(AtomicU32::new(0)),
                 reported_cwd: Arc::new(Mutex::new(None)),
                 child_wait_completed: None,
+                exit_status: None,
                 kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
                 detection_content_seq: Arc::new(AtomicU64::new(0)),
                 full_lifecycle_authority_active: Arc::new(AtomicBool::new(false)),
@@ -3389,6 +3415,7 @@ mod tests {
             child_pid: Arc::new(AtomicU32::new(0)),
             reported_cwd: Arc::new(Mutex::new(None)),
             child_wait_completed: None,
+            exit_status: None,
             kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
             detection_content_seq: Arc::new(AtomicU64::new(0)),
             full_lifecycle_authority_active: Arc::new(AtomicBool::new(false)),
@@ -3420,6 +3447,7 @@ mod tests {
             child_pid: Arc::new(AtomicU32::new(0)),
             reported_cwd: Arc::new(Mutex::new(None)),
             child_wait_completed: None,
+            exit_status: None,
             kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
             detection_content_seq: Arc::new(AtomicU64::new(0)),
             full_lifecycle_authority_active: Arc::new(AtomicBool::new(false)),

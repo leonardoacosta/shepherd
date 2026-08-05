@@ -10,6 +10,7 @@ pub(crate) mod agent_view;
 mod agents;
 mod api;
 mod api_helpers;
+mod config_editor;
 mod config_io;
 mod creation;
 mod git_refresh;
@@ -143,6 +144,7 @@ pub struct App {
     pub render_dirty: Arc<AtomicBool>,
     pub(crate) full_redraw_pending: bool,
     pub(crate) overlay_panes: HashMap<crate::layout::PaneId, OverlayPaneState>,
+    pub(crate) active_config_editor: Option<config_editor::ConfigEditorOperation>,
     pub(crate) local_terminal_notifications: bool,
     /// Whether this process applies `AppEvent::PrefixInputSource` to the host input source.
     /// The headless server sets this to false: the switch belongs to the foreground client,
@@ -613,6 +615,7 @@ impl App {
             latest_release_notes_available,
             update_dismissed: false,
             config_diagnostic,
+            config_editor_last_result: None,
             toast: None,
             pending_agent_notifications: std::collections::HashMap::new(),
             copy_feedback: None,
@@ -789,6 +792,7 @@ impl App {
             render_dirty,
             full_redraw_pending: false,
             overlay_panes: HashMap::new(),
+            active_config_editor: None,
             local_terminal_notifications: true,
             local_input_source_switch: true,
             config_reloaded_from_disk: false,

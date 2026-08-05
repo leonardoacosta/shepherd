@@ -217,6 +217,97 @@ fn request_round_trips_for_server_reload_agent_manifests() {
 }
 
 #[test]
+fn request_round_trips_for_server_config_edit() {
+    let request = Request {
+        id: "req_config_edit".into(),
+        method: Method::ServerConfigEdit(EmptyParams::default()),
+    };
+
+    let json = serde_json::to_value(&request).unwrap();
+    assert_eq!(json["method"], "server.config.edit");
+    let restored: Request = serde_json::from_value(json).unwrap();
+    assert_eq!(restored, request);
+}
+
+#[test]
+fn server_config_edit_request_ignores_a_client_supplied_path() {
+    // The server always resolves its own config path; `EmptyParams` has no
+    // path field at all, so a client-supplied path is structurally inert
+    // rather than merely policy-rejected.
+    let json = serde_json::json!({
+        "id": "req_config_edit_path",
+        "method": "server.config.edit",
+        "params": { "path": "/etc/passwd" },
+    });
+
+    let restored: Request = serde_json::from_value(json).unwrap();
+    assert_eq!(restored.method, Method::ServerConfigEdit(EmptyParams {}));
+}
+
+#[test]
+fn config_edit_opened_response_round_trips() {
+    let response = SuccessResponse {
+        id: "req_config_edit".into(),
+        result: ResponseResult::ConfigEditOpened {
+            pane: PaneInfo {
+                pane_id: "w_1-2".into(),
+                terminal_id: "term_2".into(),
+                workspace_id: "w_1".into(),
+                tab_id: "w_1:1".into(),
+                focused: true,
+                cwd: None,
+                foreground_cwd: None,
+                label: None,
+                agent: None,
+                title: None,
+                terminal_title: None,
+                terminal_title_stripped: None,
+                display_agent: None,
+                agent_status: AgentStatus::Unknown,
+                state_source: None,
+                state_labels: HashMap::new(),
+                tokens: HashMap::new(),
+                agent_session: None,
+                scroll: None,
+                revision: 0,
+            },
+            already_open: false,
+        },
+    };
+
+    let json = serde_json::to_string(&response).unwrap();
+    assert!(json.contains("\"type\":\"config_edit_opened\""));
+    assert!(json.contains("\"already_open\":false"));
+    let restored: SuccessResponse = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored, response);
+}
+
+#[test]
+fn server_config_edit_finished_event_round_trips() {
+    let envelope = EventEnvelope {
+        event: EventKind::ServerConfigEditFinished,
+        data: EventData::ServerConfigEditFinished {
+            pane_id: "w_1-2".into(),
+            workspace_id: "w_1".into(),
+            outcome: ConfigEditOutcome::Reloaded,
+            diagnostics: vec!["config.toml".into()],
+        },
+    };
+
+    let json = serde_json::to_value(&envelope).unwrap();
+    assert_eq!(json["event"], "server_config_edit_finished");
+    assert_eq!(json["data"]["outcome"], "reloaded");
+    let restored: EventEnvelope = serde_json::from_value(json).unwrap();
+    assert_eq!(restored, envelope);
+
+    let subscription = Subscription::ServerConfigEditFinished {};
+    let subscription_json = serde_json::to_value(&subscription).unwrap();
+    assert_eq!(subscription_json["type"], "server.config_edit_finished");
+    let restored_subscription: Subscription = serde_json::from_value(subscription_json).unwrap();
+    assert_eq!(restored_subscription, subscription);
+}
+
+#[test]
 fn request_round_trips_for_server_agent_manifests() {
     let request = Request {
         id: "req_agent_manifests".into(),

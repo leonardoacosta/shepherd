@@ -40,6 +40,7 @@ pub(super) enum SettingsAction {
     SaveMouseScrollLines(usize),
     SavePaneHistory(bool),
     SaveSwitchAsciiInputSourceInPrefix(bool),
+    OpenAdvancedConfigEditor,
     InstallRecommendedIntegrations,
     InstallIntegrationTarget(IntegrationTarget),
     UpdateIntegrationTarget(IntegrationTarget),
@@ -101,6 +102,9 @@ impl App {
             SettingsAction::SavePaneHistory(enabled) => self.save_pane_history_persistence(enabled),
             SettingsAction::SaveSwitchAsciiInputSourceInPrefix(enabled) => {
                 self.save_switch_ascii_input_source_in_prefix(enabled)
+            }
+            SettingsAction::OpenAdvancedConfigEditor => {
+                self.open_advanced_config_editor_from_settings()
             }
             SettingsAction::InstallRecommendedIntegrations => {
                 self.install_recommended_integrations()
@@ -297,6 +301,7 @@ fn behavior_action(state: &AppState, row: BehaviorRowId, size_delta: i8) -> Opti
             };
             (next != current).then_some(SettingsAction::SaveMouseScrollLines(next))
         }
+        BehaviorRowId::AdvancedConfigEditor => Some(SettingsAction::OpenAdvancedConfigEditor),
     }
 }
 
@@ -1349,10 +1354,17 @@ mod tests {
     fn behavior_rows_stay_reachable_and_mouse_matches_keyboard_at_40x20_64x20_80x24() {
         let mut app = app_for_mouse_test();
         open_settings_at(&mut app.state, SettingsSection::Behavior);
-        // The second-to-last row (CopyOnSelect), not the numeric ScrollLines
-        // stepper: that row's click hit-test targets its `[-]`/`[+]` zones
-        // rather than the whole row, which is covered separately above.
-        let last = app.state.behavior_rows().len() - 2;
+        // CopyOnSelect, not the numeric ScrollLines stepper: that row's
+        // click hit-test targets its `[-]`/`[+]` zones rather than the whole
+        // row, which is covered separately above. Located by id rather than
+        // position so a later row (e.g. the advanced-editor action) does not
+        // silently retarget this assertion at the stepper.
+        let last = app
+            .state
+            .behavior_rows()
+            .iter()
+            .position(|row| row.id == BehaviorRowId::CopyOnSelect)
+            .expect("CopyOnSelect row must exist");
         app.state.settings.list.selected = last;
         let last_id = app.state.behavior_rows()[last].id;
 
@@ -1374,6 +1386,58 @@ mod tests {
             assert_eq!(
                 action, expected,
                 "mouse click on the last behavior row must resolve the same action as keyboard at {width}x{height}"
+            );
+        }
+    }
+
+    #[test]
+    fn advanced_config_editor_row_reachable_by_keyboard_and_mouse_at_40x20_64x20_80x24() {
+        let mut app = app_for_mouse_test();
+        open_settings_at(&mut app.state, SettingsSection::Behavior);
+        let row_idx = app
+            .state
+            .behavior_rows()
+            .iter()
+            .position(|row| row.id == BehaviorRowId::AdvancedConfigEditor)
+            .expect("advanced config editor row must exist");
+
+        for (width, height) in [(40u16, 20u16), (64, 20), (80, 24)] {
+            app.state.view.terminal_area = ratatui::layout::Rect::new(0, 0, width, height);
+            app.state.view.sidebar_rect = ratatui::layout::Rect::default();
+            app.state.settings.list.selected = row_idx;
+
+            // Keyboard: Enter on the selected row.
+            let key_action = update_settings_state(
+                &mut app.state,
+                KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::empty()),
+            );
+            assert_eq!(
+                key_action,
+                Some(SettingsAction::OpenAdvancedConfigEditor),
+                "Enter on the advanced config editor row must open it at {width}x{height}"
+            );
+
+            // Mouse: click on the rendered row.
+            let view = crate::ui::compute_settings_view(&app.state, app.state.screen_rect());
+            let rendered_row = view
+                .rows
+                .iter()
+                .find(|row| {
+                    row.id
+                        == crate::ui::SettingsRowId::Behavior(BehaviorRowId::AdvancedConfigEditor)
+                })
+                .unwrap_or_else(|| {
+                    panic!("advanced config editor row must render at {width}x{height}")
+                });
+            let mouse_action = app.state.handle_settings_mouse(mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                rendered_row.rect.x,
+                rendered_row.rect.y,
+            ));
+            assert_eq!(
+                mouse_action,
+                Some(SettingsAction::OpenAdvancedConfigEditor),
+                "click on the advanced config editor row must open it at {width}x{height}"
             );
         }
     }

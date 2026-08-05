@@ -212,6 +212,13 @@ pub(crate) fn scrollback_editor_argv(path: &std::path::Path) -> std::io::Result<
     scrollback_editor_argv_with_env(path, editor.as_deref())
 }
 
+/// Config editor argv. Windows has no shell-wrapper-with-delete step to avoid
+/// (unlike Unix's `scrollback_editor_argv`), so this shares the same
+/// `VISUAL`/`EDITOR`/Notepad precedence and safe argv parsing.
+pub(crate) fn config_editor_argv(path: &std::path::Path) -> std::io::Result<Vec<String>> {
+    scrollback_editor_argv(path)
+}
+
 fn scrollback_editor_argv_with_env(
     path: &std::path::Path,
     editor: Option<&str>,
@@ -1674,6 +1681,58 @@ mod tests {
     fn scrollback_editor_argv_falls_back_to_notepad() {
         let path = std::path::Path::new(r"C:\Temp\shepherd-scrollback.txt");
         let argv = super::scrollback_editor_argv_with_env(path, None).unwrap();
+
+        assert_eq!(
+            argv,
+            vec!["notepad.exe".to_string(), path.display().to_string()]
+        );
+    }
+
+    #[test]
+    fn config_editor_argv_preserves_quoted_editor_and_appends_config_path() {
+        let path = std::path::Path::new(r"C:\Users\User\AppData\Roaming\shepherd\config.toml");
+        let previous_visual = std::env::var_os("VISUAL");
+        let previous_editor = std::env::var_os("EDITOR");
+        std::env::set_var(
+            "VISUAL",
+            r#""C:\Program Files\Microsoft VS Code\Code.exe" --wait"#,
+        );
+        std::env::remove_var("EDITOR");
+
+        let argv = super::config_editor_argv(path).unwrap();
+
+        match previous_visual {
+            Some(value) => std::env::set_var("VISUAL", value),
+            None => std::env::remove_var("VISUAL"),
+        }
+        match previous_editor {
+            Some(value) => std::env::set_var("EDITOR", value),
+            None => std::env::remove_var("EDITOR"),
+        }
+
+        assert_eq!(argv[0], r"C:\Program Files\Microsoft VS Code\Code.exe");
+        assert_eq!(argv[1], "--wait");
+        assert_eq!(argv[2], path.display().to_string());
+    }
+
+    #[test]
+    fn config_editor_argv_falls_back_to_notepad_with_no_editor_configured() {
+        let path = std::path::Path::new(r"C:\Temp\shepherd-config.toml");
+        let previous_visual = std::env::var_os("VISUAL");
+        let previous_editor = std::env::var_os("EDITOR");
+        std::env::remove_var("VISUAL");
+        std::env::remove_var("EDITOR");
+
+        let argv = super::config_editor_argv(path).unwrap();
+
+        match previous_visual {
+            Some(value) => std::env::set_var("VISUAL", value),
+            None => std::env::remove_var("VISUAL"),
+        }
+        match previous_editor {
+            Some(value) => std::env::set_var("EDITOR", value),
+            None => std::env::remove_var("EDITOR"),
+        }
 
         assert_eq!(
             argv,

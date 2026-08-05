@@ -203,6 +203,31 @@ mod fallback;
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 pub use fallback::*;
 
+/// Unix editor argv for the advanced config editor: `VISUAL`, then `EDITOR`,
+/// then `vi`, with the config path appended as one trailing argument and
+/// executed directly (no shell), unlike `scrollback_editor_argv`'s `sh -c`
+/// wrapper which deletes its input file on exit.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn unix_config_editor_argv(path: &std::path::Path) -> std::io::Result<Vec<String>> {
+    let editor = std::env::var("VISUAL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::var("EDITOR")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        });
+    let mut argv: Vec<String> = editor
+        .as_deref()
+        .map(|editor| editor.split_whitespace().map(str::to_string).collect())
+        .unwrap_or_default();
+    if argv.is_empty() {
+        argv.push("vi".to_string());
+    }
+    argv.push(path.display().to_string());
+    Ok(argv)
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn available_pane_shell_from_job(child_pid: u32, job: ForegroundJob) -> Option<String> {
     if job.process_group_id != child_pid
@@ -367,6 +392,89 @@ mod tests {
 
         assert!(take_terminal_resize_signal());
         assert!(!take_terminal_resize_signal());
+    }
+
+    struct EditorEnvGuard {
+        visual: Option<std::ffi::OsString>,
+        editor: Option<std::ffi::OsString>,
+    }
+
+    impl EditorEnvGuard {
+        fn set(visual: Option<&str>, editor: Option<&str>) -> Self {
+            let guard = Self {
+                visual: std::env::var_os("VISUAL"),
+                editor: std::env::var_os("EDITOR"),
+            };
+            match visual {
+                Some(value) => std::env::set_var("VISUAL", value),
+                None => std::env::remove_var("VISUAL"),
+            }
+            match editor {
+                Some(value) => std::env::set_var("EDITOR", value),
+                None => std::env::remove_var("EDITOR"),
+            }
+            guard
+        }
+    }
+
+    impl Drop for EditorEnvGuard {
+        fn drop(&mut self) {
+            match self.visual.take() {
+                Some(value) => std::env::set_var("VISUAL", value),
+                None => std::env::remove_var("VISUAL"),
+            }
+            match self.editor.take() {
+                Some(value) => std::env::set_var("EDITOR", value),
+                None => std::env::remove_var("EDITOR"),
+            }
+        }
+    }
+
+    #[test]
+    fn unix_config_editor_argv_prefers_visual_over_editor() {
+        let _guard = EditorEnvGuard::set(Some("vim"), Some("nano"));
+        let path = std::path::Path::new("/tmp/shepherd config.toml");
+
+        let argv = unix_config_editor_argv(path).unwrap();
+
+        assert_eq!(argv, vec!["vim".to_string(), path.display().to_string()]);
+    }
+
+    #[test]
+    fn unix_config_editor_argv_falls_back_to_editor_then_vi() {
+        let path = std::path::Path::new("/tmp/shepherd-config.toml");
+
+        let _guard = EditorEnvGuard::set(None, Some("nano -w"));
+        let argv = unix_config_editor_argv(path).unwrap();
+        assert_eq!(
+            argv,
+            vec![
+                "nano".to_string(),
+                "-w".to_string(),
+                path.display().to_string()
+            ]
+        );
+
+        let _guard = EditorEnvGuard::set(None, None);
+        let argv = unix_config_editor_argv(path).unwrap();
+        assert_eq!(argv, vec!["vi".to_string(), path.display().to_string()]);
+    }
+
+    #[test]
+    fn unix_config_editor_argv_preserves_multi_word_editor_command_and_one_path_argument() {
+        let _guard = EditorEnvGuard::set(Some("code --wait"), None);
+        let path = std::path::Path::new("/tmp/shepherd config; rm -rf ~.toml");
+
+        let argv = unix_config_editor_argv(path).unwrap();
+
+        assert_eq!(
+            argv,
+            vec![
+                "code".to_string(),
+                "--wait".to_string(),
+                path.display().to_string()
+            ]
+        );
     }
 
     #[test]

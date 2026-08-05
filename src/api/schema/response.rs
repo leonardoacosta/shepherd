@@ -245,6 +245,10 @@ pub enum ResponseResult {
         status: crate::config::ConfigReloadStatus,
         diagnostics: Vec<String>,
     },
+    ConfigEditOpened {
+        pane: PaneInfo,
+        already_open: bool,
+    },
     Ok {},
 }
 

@@ -237,6 +237,11 @@ impl App {
                 }
             }
         }
+        if let AppEvent::PaneDied { pane_id } = &ev {
+            if let Some(operation) = self.take_config_editor_completion(*pane_id) {
+                self.finish_config_editor(operation);
+            }
+        }
         let pane_exit_layout_target = if let AppEvent::PaneDied { pane_id } = &ev {
             self.find_pane(*pane_id).and_then(|(ws_idx, _)| {
                 self.layout_update_target_after_pane_removal(ws_idx, *pane_id)
@@ -961,6 +966,9 @@ impl App {
                     },
                 }
             }
+            Method::ServerConfigEdit(_) => {
+                return self.handle_server_config_edit(request.id);
+            }
             Method::NotificationShow(params) => {
                 return self.handle_notification_show(request.id, params);
             }
@@ -1171,6 +1179,50 @@ impl App {
         };
 
         serde_json::to_string(&response).unwrap()
+    }
+
+    fn handle_server_config_edit(&mut self, id: String) -> String {
+        use crate::api::schema::ResponseResult;
+
+        match self.open_config_editor() {
+            Ok(outcome) => match self.pane_info(outcome.ws_idx, outcome.pane_id) {
+                Some(pane) => responses::encode_success(
+                    id,
+                    ResponseResult::ConfigEditOpened {
+                        pane,
+                        already_open: outcome.already_open,
+                    },
+                ),
+                None => responses::encode_error(
+                    id,
+                    "config_editor_unavailable",
+                    "config editor pane disappeared",
+                ),
+            },
+            Err(err) => responses::encode_error(id, "config_editor_unavailable", err.to_string()),
+        }
+    }
+
+    /// Settings' advanced-editor row routes through the same
+    /// `server.config.edit` operation the API exposes — no TUI-private
+    /// shortcut — so it behaves identically whether the TUI is local or
+    /// attached to a remote server. Bounded outcome/diagnostics render from
+    /// `AppState::config_editor_last_result` once the editor exits.
+    pub(super) fn open_advanced_config_editor_from_settings(&mut self) {
+        let response = self.handle_server_config_edit("settings.config.edit".to_string());
+        let parsed = serde_json::from_str::<serde_json::Value>(&response).ok();
+        if let Some(message) = parsed
+            .as_ref()
+            .and_then(|value| value.get("error"))
+            .and_then(|error| error.get("message"))
+            .and_then(serde_json::Value::as_str)
+        {
+            self.state.config_editor_last_result =
+                Some(super::config_editor::ConfigEditorLastResult {
+                    outcome: crate::api::schema::ConfigEditOutcome::Invalid,
+                    diagnostics: vec![format!("failed to open editor: {message}")],
+                });
+        }
     }
 
     fn handle_notification_show(

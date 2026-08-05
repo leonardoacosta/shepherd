@@ -58,6 +58,8 @@ Settings is grouped into Theme, Sound, Toast, Display, Behavior, Integrations, a
 
 Changing a control writes that single key back to `config.toml`. Surrounding comments and unrelated keys are preserved. Every control in these sections applies immediately; none of them need a restart. If a write fails or the file is malformed, the last valid value stays active.
 
+For settings not covered by these curated rows, Settings also has an action to open the real `config.toml` directly in your editor (`$VISUAL`/`$EDITOR`, falling back to `vi` on Unix or Notepad on Windows). It reuses the `server.config.edit` request, so it works the same whether the TUI runs locally or attaches to a remote server. Save and exit: valid changes reload immediately; invalid changes are left on disk with diagnostics and the last valid configuration keeps running, so you can reopen and fix it right away.
+
 ### Display and Behavior
 
 Display holds visual preferences — pane borders, pane gaps, agent border labels, hiding the tab bar when only one tab is open, and Agent panel sort order — alongside the topbar and dock controls described below. The Agent panel sort control and the sidebar Agent header write the same `ui.agent_panel_sort` value, so the two cannot disagree.
@@ -452,7 +454,7 @@ claude = "on"
 
 ## Advanced configuration
 
-Search the [Config reference](/docs/config-reference/) for scrollback limits, nested launches, and other advanced or experimental settings. See [Session state and restore](/docs/session-state/) before enabling pane screen history; that guide explains the security trade-off of saving pane contents.
+Search the [Config reference](/docs/config-reference/) for scrollback limits, nested launches, and other advanced or experimental settings. See [Session state and restore](/docs/session-state/) before enabling pane screen history; that guide explains the security trade-off of saving pane contents. For any of the 150+ keys not exposed as a Settings row, use the **Settings → advanced → edit config** action (or the `server.config.edit` socket method) described above to edit `config.toml` directly.
 
 ## Kitty graphics
 
