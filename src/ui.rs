@@ -90,16 +90,14 @@ pub(crate) use self::{
         settings_show_primary_action, SETTINGS_POPUP_WIDTH,
     },
     sidebar::{
-        agent_entry_gap, agent_entry_height_in_body, agent_panel_body_rect, agent_panel_entries,
-        agent_panel_entries_from, agent_panel_scroll_for_target, agent_panel_scroll_metrics,
-        agent_panel_scroll_metrics_from_entries, agent_panel_scrollbar_rect,
-        agent_panel_toggle_rect, all_agent_panel_entries, collapsed_sidebar_sections,
-        collapsed_sidebar_toggle_rect, compute_workspace_card_areas, expanded_sidebar_sections,
-        expanded_sidebar_toggle_rect, normalized_workspace_scroll, sidebar_section_divider_rect,
-        workspace_drop_slots, workspace_group_chevron_rect, workspace_list_entries,
-        workspace_list_entries_expanded, workspace_list_rect, workspace_list_scroll_metrics,
-        workspace_list_scrollbar_rect, workspace_parent_group_state, AgentPanelEntry,
-        WorkspaceListEntry,
+        agent_panel_entries, agent_panel_entries_from, agent_panel_toggle_rect,
+        all_agent_panel_entries, collapsed_sidebar_content_rect, collapsed_sidebar_toggle_rect,
+        compute_workspace_card_areas, compute_workspace_list_areas, expanded_sidebar_toggle_rect,
+        normalized_workspace_scroll, normalized_workspace_scroll_from_entries, sidebar_rows,
+        sidebar_scroll_for_agent_entry, workspace_drop_slots, workspace_group_chevron_rect,
+        workspace_list_entries, workspace_list_entries_expanded, workspace_list_rect,
+        workspace_list_scroll_metrics, workspace_list_scrollbar_rect, workspace_parent_group_state,
+        AgentPanelEntry, SidebarRow, WorkspaceListEntry,
     },
 };
 
@@ -317,26 +315,26 @@ fn compute_view_internal(
         })
         .unwrap_or((Rect::default(), main_area));
 
-    let agent_panel_entries = if !app.sidebar_collapsed {
-        let entries = agent_panel_entries_from(app, terminal_runtimes);
-        app.workspace_scroll = normalized_workspace_scroll(app, sidebar_area, app.workspace_scroll);
-        let (_, detail_area) = expanded_sidebar_sections(sidebar_area, app.sidebar_section_split);
-        let max_agent_scroll = agent_panel_scroll_metrics_from_entries(app, &entries, detail_area)
-            .max_offset_from_bottom;
-        app.agent_panel_scroll = app.agent_panel_scroll.min(max_agent_scroll);
-        entries
-    } else {
-        app.workspace_scroll = app
-            .workspace_scroll
-            .min(app.workspaces.len().saturating_sub(1));
-        app.agent_panel_scroll = 0;
+    let agent_panel_entries = if app.sidebar_collapsed {
+        // The collapsed list still renders agents, but from a fresh derivation
+        // rather than the cached frame entries the expanded geometry needs.
+        app.workspace_scroll = 0;
         Vec::new()
+    } else {
+        let entries = agent_panel_entries_from(app, terminal_runtimes);
+        app.workspace_scroll = normalized_workspace_scroll_from_entries(
+            app,
+            &entries,
+            sidebar_area,
+            app.workspace_scroll,
+        );
+        entries
     };
 
-    let workspace_card_areas = if app.sidebar_collapsed {
-        Vec::new()
+    let (workspace_card_areas, agent_row_areas) = if app.sidebar_collapsed {
+        (Vec::new(), Vec::new())
     } else {
-        compute_workspace_card_areas(app, sidebar_area)
+        compute_workspace_list_areas(app, &agent_panel_entries, sidebar_area)
     };
 
     let tab_bar_view = app
@@ -388,6 +386,7 @@ fn compute_view_internal(
         sidebar_rect: sidebar_area,
         agent_panel_entries,
         workspace_card_areas,
+        agent_row_areas,
         tab_bar_rect,
         topbar_rect: topbar_area,
         right_panel_rect: right_panel_area,
@@ -469,6 +468,7 @@ fn compute_mobile_view(
         sidebar_rect: Rect::default(),
         agent_panel_entries: Vec::new(),
         workspace_card_areas: Vec::new(),
+        agent_row_areas: Vec::new(),
         right_panel_rect: Rect::default(),
         tab_bar_rect: Rect::default(),
         topbar_rect: Rect::default(),
@@ -1234,9 +1234,10 @@ mod tests {
         terminal.draw(|frame| render(&app, frame)).unwrap();
         let buffer = terminal.backend().buffer();
 
-        let (ws_area, _, _) = collapsed_sidebar_sections(app.view.sidebar_rect);
-        let active_row = ws_area.y + 1;
-        let active_style = buffer[(ws_area.x, active_row)].style();
+        // Flat rows: space one, its empty state, space two, its empty state.
+        let content = collapsed_sidebar_content_rect(app.view.sidebar_rect);
+        let active_row = content.y + 2;
+        let active_style = buffer[(content.x, active_row)].style();
 
         assert_eq!(active_style.bg, Some(app.palette.surface_dim));
     }

@@ -302,12 +302,12 @@ mod tests {
         assert!(!app.view.split_borders.is_empty());
         assert!(frame.cursor.is_some());
         assert_eq!(frame.hyperlinks, vec![uri.to_owned()]);
-        // Digest last moved when the sidebar Agent panel header became
-        // `sort: grouped`/`sort: priority` instead of a bare value; geometry
-        // assertions above are unchanged, so only rendered text differs.
+        // Digest last moved when the sidebar merged its two sections into one
+        // flat space-and-agent list; geometry assertions above are unchanged, so
+        // only rendered text differs.
         assert_eq!(
             frame_digest(&frame),
-            "c34657a8efc1a3c70f85e56c586d2501e7bc2eb625cea2fe3b72458957ca0b56"
+            "4efd76ca0ced847e098a59b0fbbee4a11d0bb2584c31c7626a365c71aaff18f8"
         );
     }
 

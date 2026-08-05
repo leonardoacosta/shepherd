@@ -400,7 +400,6 @@ impl App {
             selected,
             sidebar_width,
             sidebar_width_source,
-            sidebar_section_split,
             collapsed_space_keys,
         ) = if no_session {
             (
@@ -409,7 +408,6 @@ impl App {
                 0,
                 config.ui.sidebar_width,
                 state::SidebarWidthSource::ConfigDefault,
-                0.5_f32,
                 std::collections::HashSet::new(),
             )
         } else if let Some(snap) = crate::persist::load() {
@@ -445,7 +443,6 @@ impl App {
                     } else {
                         state::SidebarWidthSource::ConfigDefault
                     },
-                    snap.sidebar_section_split.unwrap_or(0.5),
                     snap.collapsed_space_keys,
                 )
             } else {
@@ -462,7 +459,6 @@ impl App {
                     } else {
                         state::SidebarWidthSource::ConfigDefault
                     },
-                    snap.sidebar_section_split.unwrap_or(0.5),
                     snap.collapsed_space_keys,
                 )
             }
@@ -473,7 +469,6 @@ impl App {
                 0,
                 config.ui.sidebar_width,
                 state::SidebarWidthSource::ConfigDefault,
-                0.5_f32,
                 std::collections::HashSet::new(),
             )
         };
@@ -585,7 +580,6 @@ impl App {
             navigator: state::NavigatorState::default(),
             copy_mode: None,
             workspace_scroll: 0,
-            agent_panel_scroll: 0,
             tab_scroll: 0,
             tab_scroll_follow_active: true,
             mobile_switcher_scroll: 0,
@@ -595,6 +589,7 @@ impl App {
                 sidebar_rect: Rect::default(),
                 agent_panel_entries: Vec::new(),
                 workspace_card_areas: Vec::new(),
+                agent_row_areas: Vec::new(),
                 tab_bar_rect: Rect::default(),
                 topbar_rect: Rect::default(),
                 right_panel_rect: Rect::default(),
@@ -638,7 +633,6 @@ impl App {
             sidebar_width_auto: false,
             sidebar_collapsed: config.ui.sidebar_start_collapsed,
             sidebar_collapsed_mode: config.ui.sidebar_collapsed_mode,
-            sidebar_section_split,
             agent_panel_sort,
             agent_view_override: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
@@ -866,9 +860,6 @@ impl App {
         if let Some(width) = snapshot.sidebar_width {
             app.state.sidebar_width = width;
             app.state.sidebar_width_source = state::SidebarWidthSource::Persisted;
-        }
-        if let Some(split) = snapshot.sidebar_section_split {
-            app.state.sidebar_section_split = split;
         }
         app.state.collapsed_space_keys = snapshot.collapsed_space_keys.clone();
         app.state.mode = if app.state.active.is_some() {
@@ -1523,7 +1514,8 @@ impl App {
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
-                self.state.agent_panel_scroll = 0;
+                // Row-token changes resize every row, so the old offset means nothing.
+                self.state.workspace_scroll = 0;
                 self.state.accent = crate::config::parse_color(&config.ui.accent);
                 if !self.state.local_sound_playback && self.state.sound != config.ui.sound {
                     self.state.request_client_config_reload = true;
@@ -2960,11 +2952,11 @@ mod tests {
             "[ui.sidebar.agents]\nrows = [[\"state_icon\", \"$summary\"]]\nrow_gap = 1\n\n[ui.sidebar.agents.rows_by_agent]\nclaude = [[\"terminal_title_stripped\"]]\n\n[ui.sidebar.spaces]\nrows = [[\"workspace\", \"$jj_status\"]]\nrow_gap = 3\n",
         )
         .unwrap();
-        app.state.agent_panel_scroll = 5;
+        app.state.workspace_scroll = 5;
         let report = app.reload_config();
 
         assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
-        assert_eq!(app.state.agent_panel_scroll, 0);
+        assert_eq!(app.state.workspace_scroll, 0);
         assert_eq!(
             app.state.sidebar_agents.rows,
             vec![vec![

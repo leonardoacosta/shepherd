@@ -53,7 +53,10 @@ Settings SHALL apply supported values live and SHALL explicitly label any value 
 - **THEN** its row and completion feedback say `next launch`, and tests assert that current runtime behavior is unchanged until restart
 
 ### Requirement: Agent sort has one persisted source
-The contextual Agent-panel toggle and Settings control SHALL read and write the same `ui.agent_panel_sort` key and SHALL use clarified contextual labels.
+The contextual agent-sort toggle and the Settings control SHALL read and write the same
+`ui.agent_panel_sort` key and SHALL use clarified contextual labels. The contextual toggle SHALL
+live on the merged space-and-agent list rather than on a separate agent panel, and the sort SHALL
+order agent rows within each space.
 
 #### Scenario: Sidebar toggles sort
 - **WHEN** the contextual control changes from grouped to priority
@@ -61,7 +64,12 @@ The contextual Agent-panel toggle and Settings control SHALL read and write the 
 
 #### Scenario: Settings changes sort
 - **WHEN** Settings changes Agent sort
-- **THEN** the sidebar ordering/label updates from the same live configuration without a second state source
+- **THEN** the merged list's ordering and label update from the same live configuration without a second state source
+
+#### Scenario: Sort applies within every space
+- **WHEN** the sort changes and several spaces are running agents
+- **THEN** each space's agent rows reorder consistently beneath their own space row
+- **AND** no agent row moves to a different space
 
 ### Requirement: Numeric preferences obey config bounds
 Settings SHALL constrain mouse scroll lines and pane gap controls to the same accepted bounds and normalization rules as the configuration parser.

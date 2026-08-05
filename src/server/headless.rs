@@ -143,8 +143,6 @@ fn record_render_impact(source: &'static str, impact: RenderImpact) {
 type ClientViewProjection = (
     u16,
     bool,
-    f32,
-    usize,
     usize,
     usize,
     bool,
@@ -1024,9 +1022,7 @@ impl HeadlessServer {
             (
                 view.sidebar_width,
                 view.sidebar_collapsed,
-                view.sidebar_section_split,
                 view.workspace_scroll,
-                view.agent_panel_scroll,
                 view.tab_scroll,
                 view.tab_scroll_follow_active,
                 view.mobile_switcher_scroll,
@@ -1065,9 +1061,7 @@ impl HeadlessServer {
         Some((
             view.sidebar_width,
             view.sidebar_collapsed,
-            view.sidebar_section_split,
             view.workspace_scroll,
-            view.agent_panel_scroll,
             view.tab_scroll,
             view.tab_scroll_follow_active,
             view.mobile_switcher_scroll,
@@ -1096,9 +1090,7 @@ impl HeadlessServer {
         if let Some((
             sidebar_width,
             sidebar_collapsed,
-            sidebar_section_split,
             workspace_scroll,
-            agent_panel_scroll,
             tab_scroll,
             tab_scroll_follow_active,
             mobile_switcher_scroll,
@@ -1109,9 +1101,7 @@ impl HeadlessServer {
         {
             self.app.state.sidebar_width = sidebar_width;
             self.app.state.sidebar_collapsed = sidebar_collapsed;
-            self.app.state.sidebar_section_split = sidebar_section_split;
             self.app.state.workspace_scroll = workspace_scroll;
-            self.app.state.agent_panel_scroll = agent_panel_scroll;
             self.app.state.tab_scroll = tab_scroll;
             self.app.state.tab_scroll_follow_active = tab_scroll_follow_active;
             self.app.state.mobile_switcher_scroll = mobile_switcher_scroll;
@@ -3726,9 +3716,7 @@ next_tab = ""
         server.app.state.mode = crate::app::Mode::Navigator;
         server.app.state.sidebar_width = 31;
         server.app.state.sidebar_collapsed = true;
-        server.app.state.sidebar_section_split = 0.625;
         server.app.state.workspace_scroll = 2;
-        server.app.state.agent_panel_scroll = 4;
         server.app.state.tab_scroll = 6;
         server.app.state.tab_scroll_follow_active = false;
         server.app.state.mobile_switcher_scroll = 8;
@@ -3756,9 +3744,7 @@ next_tab = ""
         assert_eq!(client_view.mode, crate::app::Mode::Navigator);
         assert_eq!(client_view.sidebar_width, 31);
         assert!(client_view.sidebar_collapsed);
-        assert_eq!(client_view.sidebar_section_split, 0.625);
         assert_eq!(client_view.workspace_scroll, 2);
-        assert_eq!(client_view.agent_panel_scroll, 4);
         assert_eq!(client_view.tab_scroll, 6);
         assert!(!client_view.tab_scroll_follow_active);
         assert_eq!(client_view.mobile_switcher_scroll, 8);
@@ -3903,9 +3889,7 @@ next_tab = ""
         }));
 
         server.app.state.sidebar_collapsed = false;
-        server.app.state.sidebar_section_split = 0.5;
         server.app.state.workspace_scroll = 0;
-        server.app.state.agent_panel_scroll = 0;
         server.app.state.tab_scroll = 0;
         server.app.state.tab_scroll_follow_active = true;
         server.app.state.mobile_switcher_scroll = 0;
@@ -3918,9 +3902,7 @@ next_tab = ""
             .and_then(|client| client.client_view.as_mut())
             .expect("app client view state");
         client_view.sidebar_collapsed = true;
-        client_view.sidebar_section_split = 0.625;
         client_view.workspace_scroll = 3;
-        client_view.agent_panel_scroll = 5;
         client_view.tab_scroll = 7;
         client_view.tab_scroll_follow_active = false;
         client_view.mobile_switcher_scroll = 9;
@@ -3930,9 +3912,7 @@ next_tab = ""
         server.sync_foreground_client_state();
 
         assert!(server.app.state.sidebar_collapsed);
-        assert_eq!(server.app.state.sidebar_section_split, 0.625);
         assert_eq!(server.app.state.workspace_scroll, 3);
-        assert_eq!(server.app.state.agent_panel_scroll, 5);
         assert_eq!(server.app.state.tab_scroll, 7);
         assert!(!server.app.state.tab_scroll_follow_active);
         assert_eq!(server.app.state.mobile_switcher_scroll, 9);
@@ -4011,19 +3991,12 @@ next_tab = ""
         }));
         server.foreground_client_id = Some(1);
         server.app.state.sidebar_width = 26;
-        server.app.state.sidebar_section_split = 0.5;
         server
             .clients
             .get_mut(&1)
             .and_then(|client| client.client_view.as_mut())
             .expect("foreground app client view state")
             .sidebar_width = 33;
-        server
-            .clients
-            .get_mut(&1)
-            .and_then(|client| client.client_view.as_mut())
-            .expect("foreground app client view state")
-            .sidebar_section_split = 0.4;
 
         server.sync_persisted_client_view_projection();
 
@@ -4034,11 +4007,9 @@ next_tab = ""
             server.app.state.active,
             server.app.state.selected,
             server.app.state.sidebar_width,
-            server.app.state.sidebar_section_split,
             server.app.state.collapsed_space_keys.clone(),
         );
         assert_eq!(snapshot.sidebar_width, Some(33));
-        assert_eq!(snapshot.sidebar_section_split, Some(0.4));
     }
 
     #[test]
@@ -4070,19 +4041,12 @@ next_tab = ""
         }));
         server.foreground_client_id = None;
         server.app.state.sidebar_width = 26;
-        server.app.state.sidebar_section_split = 0.5;
         server
             .clients
             .get_mut(&2)
             .and_then(|client| client.client_view.as_mut())
             .expect("latest app client view state")
             .sidebar_width = 41;
-        server
-            .clients
-            .get_mut(&2)
-            .and_then(|client| client.client_view.as_mut())
-            .expect("latest app client view state")
-            .sidebar_section_split = 0.3;
 
         server.sync_persisted_client_view_projection();
 
@@ -4093,11 +4057,9 @@ next_tab = ""
             server.app.state.active,
             server.app.state.selected,
             server.app.state.sidebar_width,
-            server.app.state.sidebar_section_split,
             server.app.state.collapsed_space_keys.clone(),
         );
         assert_eq!(snapshot.sidebar_width, Some(41));
-        assert_eq!(snapshot.sidebar_section_split, Some(0.3));
     }
 
     #[test]

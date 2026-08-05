@@ -618,7 +618,6 @@ mod tests {
             active: None,
             selected: 0,
             sidebar_width: None,
-            sidebar_section_split: None,
             collapsed_space_keys: std::collections::HashSet::new(),
         };
         let manifest = manifest_for(snapshot, Vec::new(), None, None, Vec::new());

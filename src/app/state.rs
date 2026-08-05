@@ -632,6 +632,14 @@ pub struct WorkspaceCardArea {
     pub indented: bool,
 }
 
+/// An agent row of the merged sidebar list. `entry_idx` points into the frame's
+/// `agent_panel_entries`; `None` is the non-selectable "no agents" row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SidebarAgentRowArea {
+    pub rect: Rect,
+    pub entry_idx: Option<usize>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeCreateState {
     pub source_workspace_id: String,
@@ -788,6 +796,7 @@ pub struct ViewState {
     pub sidebar_rect: Rect,
     pub agent_panel_entries: Vec<crate::ui::AgentPanelEntry>,
     pub workspace_card_areas: Vec<WorkspaceCardArea>,
+    pub agent_row_areas: Vec<SidebarAgentRowArea>,
     pub tab_bar_rect: Rect,
     pub topbar_rect: Rect,
     pub right_panel_rect: Rect,
@@ -813,6 +822,7 @@ impl ViewState {
             sidebar_rect: _,
             agent_panel_entries: _,
             workspace_card_areas: _,
+            agent_row_areas: _,
             tab_bar_rect: _,
             topbar_rect: _,
             right_panel_rect: _,
@@ -835,6 +845,7 @@ impl ViewState {
             "sidebar_rect",
             "agent_panel_entries",
             "workspace_card_areas",
+            "agent_row_areas",
             "tab_bar_rect",
             "topbar_rect",
             "right_panel_rect",
@@ -861,9 +872,7 @@ pub struct ClientViewState {
     pub mode: Mode,
     pub sidebar_width: u16,
     pub sidebar_collapsed: bool,
-    pub sidebar_section_split: f32,
     pub workspace_scroll: usize,
-    pub agent_panel_scroll: usize,
     pub tab_scroll: usize,
     pub tab_scroll_follow_active: bool,
     pub mobile_switcher_scroll: usize,
@@ -881,9 +890,7 @@ impl ClientViewState {
             mode: _,
             sidebar_width: _,
             sidebar_collapsed: _,
-            sidebar_section_split: _,
             workspace_scroll: _,
-            agent_panel_scroll: _,
             tab_scroll: _,
             tab_scroll_follow_active: _,
             mobile_switcher_scroll: _,
@@ -895,9 +902,7 @@ impl ClientViewState {
             mode: seed.mode,
             sidebar_width: seed.sidebar_width,
             sidebar_collapsed: seed.sidebar_collapsed,
-            sidebar_section_split: seed.sidebar_section_split,
             workspace_scroll: seed.workspace_scroll,
-            agent_panel_scroll: seed.agent_panel_scroll,
             tab_scroll: seed.tab_scroll,
             tab_scroll_follow_active: seed.tab_scroll_follow_active,
             mobile_switcher_scroll: seed.mobile_switcher_scroll,
@@ -911,9 +916,7 @@ impl ClientViewState {
             "mode",
             "sidebar_width",
             "sidebar_collapsed",
-            "sidebar_section_split",
             "workspace_scroll",
-            "agent_panel_scroll",
             "tab_scroll",
             "tab_scroll_follow_active",
             "mobile_switcher_scroll",
@@ -1408,9 +1411,6 @@ pub(crate) enum DragTarget {
     WorkspaceListScrollbar {
         grab_row_offset: u16,
     },
-    AgentPanelScrollbar {
-        grab_row_offset: u16,
-    },
     PaneSplit {
         path: Vec<bool>,
         direction: Direction,
@@ -1431,7 +1431,6 @@ pub(crate) enum DragTarget {
         grab_row_offset: u16,
     },
     SidebarDivider,
-    SidebarSectionDivider,
 }
 
 /// Active mouse drag on a split border or sidebar divider.
@@ -1714,7 +1713,6 @@ pub struct AppState {
     pub navigator: NavigatorState,
     pub copy_mode: Option<CopyModeState>,
     pub workspace_scroll: usize,
-    pub agent_panel_scroll: usize,
     pub tab_scroll: usize,
     pub tab_scroll_follow_active: bool,
     pub mobile_switcher_scroll: usize,
@@ -1755,8 +1753,6 @@ pub struct AppState {
     pub sidebar_width_auto: bool,
     pub sidebar_collapsed: bool,
     pub sidebar_collapsed_mode: crate::config::SidebarCollapsedModeConfig,
-    /// Ratio of sidebar height allocated to the workspaces section.
-    pub sidebar_section_split: f32,
     pub agent_panel_sort: AgentPanelSort,
     /// Transient session-wide projection override for the built-in Agents view.
     pub agent_view_override: Option<crate::api::schema::AgentViewSetParams>,
@@ -2447,9 +2443,7 @@ impl AppState {
             mode: self.mode,
             sidebar_width: self.sidebar_width,
             sidebar_collapsed: self.sidebar_collapsed,
-            sidebar_section_split: self.sidebar_section_split,
             workspace_scroll: self.workspace_scroll,
-            agent_panel_scroll: self.agent_panel_scroll,
             tab_scroll: self.tab_scroll,
             tab_scroll_follow_active: self.tab_scroll_follow_active,
             mobile_switcher_scroll: self.mobile_switcher_scroll,
@@ -2461,6 +2455,7 @@ impl AppState {
                 sidebar_rect: self.view.sidebar_rect,
                 agent_panel_entries: self.view.agent_panel_entries.clone(),
                 workspace_card_areas: self.view.workspace_card_areas.clone(),
+                agent_row_areas: self.view.agent_row_areas.clone(),
                 tab_bar_rect: self.view.tab_bar_rect,
                 topbar_rect: self.view.topbar_rect,
                 right_panel_rect: self.view.right_panel_rect,
@@ -2544,7 +2539,6 @@ impl AppState {
             navigator: NavigatorState::default(),
             copy_mode: None,
             workspace_scroll: 0,
-            agent_panel_scroll: 0,
             tab_scroll: 0,
             tab_scroll_follow_active: true,
             mobile_switcher_scroll: 0,
@@ -2554,6 +2548,7 @@ impl AppState {
                 sidebar_rect: Rect::default(),
                 agent_panel_entries: Vec::new(),
                 workspace_card_areas: Vec::new(),
+                agent_row_areas: Vec::new(),
                 tab_bar_rect: Rect::default(),
                 topbar_rect: Rect::default(),
                 right_panel_rect: Rect::default(),
@@ -2597,7 +2592,6 @@ impl AppState {
             sidebar_width_auto: false,
             sidebar_collapsed: false,
             sidebar_collapsed_mode: crate::config::SidebarCollapsedModeConfig::Compact,
-            sidebar_section_split: 0.5,
             agent_panel_sort: AgentPanelSort::Spaces,
             agent_view_override: None,
             sidebar_agents: crate::config::AgentsSidebarConfig::default(),
@@ -3352,6 +3346,7 @@ mod tests {
                 "sidebar_rect",
                 "agent_panel_entries",
                 "workspace_card_areas",
+                "agent_row_areas",
                 "tab_bar_rect",
                 "topbar_rect",
                 // Added by `anchor-chrome-to-sidebar`: the right chrome panel is a
@@ -3382,9 +3377,7 @@ mod tests {
                 "mode",
                 "sidebar_width",
                 "sidebar_collapsed",
-                "sidebar_section_split",
                 "workspace_scroll",
-                "agent_panel_scroll",
                 "tab_scroll",
                 "tab_scroll_follow_active",
                 "mobile_switcher_scroll",
@@ -3402,9 +3395,7 @@ mod tests {
         state.mode = Mode::Navigator;
         state.sidebar_width = 37;
         state.sidebar_collapsed = true;
-        state.sidebar_section_split = 0.625;
         state.workspace_scroll = 3;
-        state.agent_panel_scroll = 5;
         state.tab_scroll = 7;
         state.tab_scroll_follow_active = false;
         state.mobile_switcher_scroll = 9;
@@ -3417,9 +3408,7 @@ mod tests {
         assert_eq!(client_view.mode, Mode::Navigator);
         assert_eq!(client_view.sidebar_width, 37);
         assert!(client_view.sidebar_collapsed);
-        assert_eq!(client_view.sidebar_section_split, 0.625);
         assert_eq!(client_view.workspace_scroll, 3);
-        assert_eq!(client_view.agent_panel_scroll, 5);
         assert_eq!(client_view.tab_scroll, 7);
         assert!(!client_view.tab_scroll_follow_active);
         assert_eq!(client_view.mobile_switcher_scroll, 9);

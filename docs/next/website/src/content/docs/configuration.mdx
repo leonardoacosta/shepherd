@@ -62,7 +62,7 @@ For settings not covered by these curated rows, Settings also has an action to o
 
 ### Display and Behavior
 
-Display holds visual preferences — pane borders, pane gaps, agent border labels, hiding the tab bar when only one tab is open, and Agent panel sort order — alongside the topbar and dock controls described below. The Agent panel sort control and the sidebar Agent header write the same `ui.agent_panel_sort` value, so the two cannot disagree.
+Display holds visual preferences — pane borders, pane gaps, agent border labels, hiding the tab bar when only one tab is open, and agent sort order — alongside the topbar and dock controls described below. The Settings sort control and the sidebar header control write the same `ui.agent_panel_sort` value, so the two cannot disagree.
 
 Behavior holds interaction preferences — close confirmation, tab and workspace naming prompts, copy-on-select, and mouse scroll speed.
 
@@ -278,7 +278,29 @@ Color values accept hex, named colors, `rgb(r,g,b)`, or reset aliases like `rese
 
 ## UI and sidebar
 
-The sidebar is the main Shepherd dashboard. Search `ui.` in the [Config reference](/docs/config-reference/) for sizing, collapsed mode, Agent panel ordering, mouse behavior, pane borders, and other presentation settings.
+The sidebar is the main Shepherd dashboard. Search `ui.` in the [Config reference](/docs/config-reference/) for sizing, collapsed mode, agent ordering, mouse behavior, pane borders, and other presentation settings.
+
+### One flat space-and-agent list
+
+The sidebar renders a single list. Each space row is followed directly by the agent rows running
+inside that space, then the next space. There is no separate agents section and no draggable
+divider between them.
+
+An agent row is the switch target. Selecting one activates that agent's space, its tab, and its
+pane, from any space. Tabs get no rows of their own — the agents inside them are what you switch
+between.
+
+A space running no detected agent shows an explicit `no agents` row beneath it, so "nothing
+running here" is visible rather than inferred from an empty gap. A collapsed worktree parent shows
+no child rows at all, which is what distinguishes collapse from an idle space.
+
+Worktree grouping, the collapse chevron, space drag-reorder, shortcut numbering by visible
+position, and the agent sort control all work as before, now against the one list. The sort
+control sits on the sidebar header and orders each space's agents beneath their own space row.
+
+Earlier releases split the sidebar into a spaces section and an agents section with a draggable
+divider, and persisted that divider position in the session file. The divider is gone. A session
+file written before this change still restores; the stored divider position is ignored.
 
 ### Chrome panels and dock
 

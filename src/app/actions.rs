@@ -1574,16 +1574,9 @@ impl AppState {
             return;
         }
 
-        let (_, detail_area) = crate::ui::expanded_sidebar_sections(
-            self.view.sidebar_rect,
-            self.sidebar_section_split,
-        );
-        self.agent_panel_scroll = crate::ui::agent_panel_scroll_for_target(
-            self,
-            detail_area,
-            self.agent_panel_scroll,
-            idx,
-        );
+        let list_area = crate::ui::workspace_list_rect(self.view.sidebar_rect);
+        self.workspace_scroll =
+            crate::ui::sidebar_scroll_for_agent_entry(self, list_area, self.workspace_scroll, idx);
     }
 
     pub(crate) fn terminal_ids_for_workspace(
@@ -4386,7 +4379,7 @@ mod tests {
 
         let last_idx = state.workspaces[0].tabs.len() - 1;
         assert_eq!(state.workspaces[0].active_tab, last_idx);
-        assert!(state.agent_panel_scroll > 0);
+        assert!(state.workspace_scroll > 0);
         state.assert_invariants_for_test();
     }
 
