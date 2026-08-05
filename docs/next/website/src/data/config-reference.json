@@ -704,6 +704,35 @@
           ]
         },
         {
+          "key": "ui.right_panel.enabled",
+          "type": "boolean",
+          "default": "false",
+          "description": "Show the configurable right chrome panel. It renders resolved token rows on the right edge and spans the full terminal height beside the sidebar. A chrome panel hosts no terminal and accepts no focus — that is the dock."
+        },
+        {
+          "key": "ui.right_panel.width",
+          "type": "integer",
+          "default": "24",
+          "description": "Columns reserved for the right chrome panel when it is enabled and at least one row resolves. Clamped so at least one main-content column survives."
+        },
+        {
+          "key": "ui.right_panel.rows",
+          "type": "list of token rows",
+          "default": "[[\"workspace\"]]",
+          "description": "Right-panel layout using the same active-main-pane Agent built-ins, workspace-first $name metadata, inline token styles, and separators as top-bar and Agent sidebar rows. Absent tokens elide with their separator; a fully unresolved row is omitted.",
+          "values": [
+            "stateicon",
+            "statetext",
+            "workspace",
+            "tab",
+            "pane",
+            "agent",
+            "terminaltitle",
+            "terminaltitlestripped",
+            "custom"
+          ]
+        },
+        {
           "key": "ui.dock.enabled",
           "type": "boolean",
           "default": "false",

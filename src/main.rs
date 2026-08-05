@@ -345,8 +345,18 @@ const DEFAULT_CONFIG: &str = r##"# shepherd configuration
 
 # Desktop-only workspace header. Each inner array renders as one nonempty row.
 # Uses Agent-row built-ins plus $name pane/workspace metadata tokens and inline styles.
+# The sidebar owns the full-height left edge; the topbar renders beside it across the
+# main content only.
 [ui.topbar]
 enabled = false
+rows = [["workspace"]]
+
+# Desktop-only right chrome panel. Same token vocabulary and elision rules as the topbar.
+# A chrome panel renders tokens only: it hosts no terminal and takes no focus (that is the
+# dock, below). Width is clamped so at least one main-content column survives.
+[ui.right_panel]
+enabled = false
+width = 24
 rows = [["workspace"]]
 
 # Desktop-only workspace plugin dock. Enabling it does not start a pane;
@@ -936,6 +946,9 @@ mod tests {
 
         assert!(!config.ui.topbar.enabled);
         assert_eq!(config.ui.topbar.rows.len(), 1);
+        assert!(!config.ui.right_panel.enabled);
+        assert_eq!(config.ui.right_panel.width, 24);
+        assert_eq!(config.ui.right_panel.rows.len(), 1);
         assert!(!config.ui.dock.enabled);
         assert!(matches!(config.ui.dock.side, config::DockSide::Bottom));
         assert_eq!(config.ui.dock.size, 10);

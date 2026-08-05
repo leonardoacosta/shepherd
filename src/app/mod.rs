@@ -591,6 +591,7 @@ impl App {
                 workspace_card_areas: Vec::new(),
                 tab_bar_rect: Rect::default(),
                 topbar_rect: Rect::default(),
+                right_panel_rect: Rect::default(),
                 dock_rect: Rect::default(),
                 dock_pane_info: None,
                 tab_hit_areas: Vec::new(),
@@ -652,6 +653,9 @@ impl App {
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             topbar_enabled: config.ui.topbar.enabled,
             topbar_rows: config.ui.topbar.rows.clone(),
+            right_panel_enabled: config.ui.right_panel.enabled,
+            right_panel_width: config.ui.right_panel.width,
+            right_panel_rows: config.ui.right_panel.rows.clone(),
             dock_enabled: config.ui.dock.enabled,
             dock_side: config.ui.dock.side,
             dock_size: config.ui.dock.size,
@@ -1501,6 +1505,9 @@ impl App {
                 self.state.hide_tab_bar_when_single_tab = config.ui.hide_tab_bar_when_single_tab;
                 self.state.topbar_enabled = config.ui.topbar.enabled;
                 self.state.topbar_rows = config.ui.topbar.rows.clone();
+                self.state.right_panel_enabled = config.ui.right_panel.enabled;
+                self.state.right_panel_width = config.ui.right_panel.width;
+                self.state.right_panel_rows = config.ui.right_panel.rows.clone();
                 self.state.dock_enabled = config.ui.dock.enabled;
                 self.state.dock_side = config.ui.dock.side;
                 self.state.dock_size = config.ui.dock.size;

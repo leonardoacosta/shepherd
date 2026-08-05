@@ -73,7 +73,10 @@ pub(crate) use self::tab_surface::{
     compute_tab_surface, render_tab_surface, resize_tab_surface, TabSurfaceLayout,
 };
 use self::tabs::render_tab_bar;
-use self::topbar::{render_topbar, resolved_rows as resolved_topbar_rows};
+use self::topbar::{
+    render_right_panel, render_topbar, resolved_right_panel_rows,
+    resolved_rows as resolved_topbar_rows,
+};
 pub(crate) use self::{
     dialogs::{
         confirm_close_button_rects, confirm_close_popup_rect, new_linked_worktree_button_rects,
@@ -239,15 +242,38 @@ fn compute_view_internal(
             .clamp(app.sidebar_min_width, app.sidebar_max_width)
     };
 
-    let topbar_height = (resolved_topbar_rows(app).len() as u16).min(area.height.saturating_sub(1));
-    let [topbar_area, body_area] = if topbar_height > 0 {
-        Layout::vertical([Constraint::Length(topbar_height), Constraint::Min(1)]).areas(area)
+    // Side columns come off the full frame first so both chrome panels anchor the whole
+    // height; the topbar then continues from the sidebar across the main content only.
+    // Widths are resolved before the split so the main content is guaranteed a column
+    // rather than relying on the constraint solver to arbitrate three fixed demands.
+    let sidebar_w = sidebar_w.min(area.width.saturating_sub(1));
+    let right_panel_w = if resolved_right_panel_rows(app).is_empty() {
+        0
     } else {
-        [Rect::default(), area]
+        app.right_panel_width
+            .min(area.width.saturating_sub(sidebar_w).saturating_sub(1))
+    };
+    let [sidebar_area, body_area, right_panel_area] = Layout::horizontal([
+        Constraint::Length(sidebar_w),
+        Constraint::Min(1),
+        Constraint::Length(right_panel_w),
+    ])
+    .areas(area);
+    // A zero-width slice still carries the frame's x/height. Normalize it to the empty rect
+    // so an unreserved chrome region compares equal to `dock_rect`'s disabled convention.
+    let right_panel_area = if right_panel_w == 0 {
+        Rect::default()
+    } else {
+        right_panel_area
     };
 
-    let [sidebar_area, main_area] =
-        Layout::horizontal([Constraint::Length(sidebar_w), Constraint::Min(1)]).areas(body_area);
+    let topbar_height =
+        (resolved_topbar_rows(app).len() as u16).min(body_area.height.saturating_sub(1));
+    let [topbar_area, main_area] = if topbar_height > 0 {
+        Layout::vertical([Constraint::Length(topbar_height), Constraint::Min(1)]).areas(body_area)
+    } else {
+        [Rect::default(), body_area]
+    };
 
     let has_live_dock = resolve_live_dock(app, terminal_runtimes).is_some();
     app.clear_invalid_dock_focus(terminal_runtimes);
@@ -364,6 +390,7 @@ fn compute_view_internal(
         workspace_card_areas,
         tab_bar_rect,
         topbar_rect: topbar_area,
+        right_panel_rect: right_panel_area,
         dock_rect: dock_area,
         dock_pane_info: resolve_live_dock(app, terminal_runtimes).and_then(|dock| {
             (!dock_area.is_empty()).then(|| PaneInfo {
@@ -442,6 +469,7 @@ fn compute_mobile_view(
         sidebar_rect: Rect::default(),
         agent_panel_entries: Vec::new(),
         workspace_card_areas: Vec::new(),
+        right_panel_rect: Rect::default(),
         tab_bar_rect: Rect::default(),
         topbar_rect: Rect::default(),
         dock_rect: Rect::default(),
@@ -477,6 +505,7 @@ pub fn render_with_runtime_registry(
 
     render_navigation_chrome(app, terminal_runtimes, frame);
     render_topbar(app, frame, app.view.topbar_rect);
+    render_right_panel(app, frame, app.view.right_panel_rect);
     render_dock(app, terminal_runtimes, frame, app.view.dock_rect);
     if app.view.layout != ViewLayout::Mobile {
         render_tab_bar(app, frame, tab_bar_area);
@@ -1091,6 +1120,102 @@ mod tests {
 
         assert_eq!(app.view.topbar_rect.height, 1);
         assert_eq!(app.view.terminal_area.height, 1);
+    }
+
+    #[test]
+    fn sidebar_anchors_full_height_beside_a_resolved_topbar() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("anchor")];
+        app.active = Some(0);
+        app.topbar_enabled = true;
+        app.topbar_rows = vec![vec![crate::config::AgentSidebarToken::Workspace]; 2];
+
+        compute_view(&mut app, Rect::new(0, 0, 100, 30));
+
+        let sidebar = app.view.sidebar_rect;
+        assert_eq!(sidebar.y, 0, "sidebar starts at the first terminal row");
+        assert_eq!(
+            sidebar.y + sidebar.height,
+            30,
+            "sidebar reaches the last terminal row"
+        );
+
+        let topbar = app.view.topbar_rect;
+        assert_eq!(topbar.height, 2, "both configured rows resolve");
+        assert_eq!(
+            topbar.x, sidebar.width,
+            "topbar begins at the sidebar's right edge"
+        );
+        assert_eq!(
+            topbar.width,
+            100 - sidebar.width,
+            "topbar spans the main-content width only"
+        );
+    }
+
+    #[test]
+    fn both_side_panels_clamp_to_preserve_one_main_content_column() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("clamp")];
+        app.active = Some(0);
+        // Stay above `mobile_width_threshold` (64 by default) so this exercises the desktop
+        // clamp rather than falling through to the mobile single-column layout.
+        app.sidebar_width = 40;
+        app.sidebar_min_width = 1;
+        app.sidebar_max_width = 40;
+        app.right_panel_enabled = true;
+        app.right_panel_width = 40;
+        app.right_panel_rows = vec![vec![crate::config::AgentSidebarToken::Workspace]];
+
+        compute_view(&mut app, Rect::new(0, 0, 70, 10));
+
+        let sidebar = app.view.sidebar_rect;
+        let right = app.view.right_panel_rect;
+        assert_eq!(sidebar.height, 10, "left panel spans the full height");
+        assert_eq!(right.height, 10, "right panel spans the full height");
+        assert!(
+            sidebar.width + right.width <= 69,
+            "side panels must leave a main-content column: {} + {}",
+            sidebar.width,
+            right.width
+        );
+        assert!(
+            app.view.terminal_area.width >= 1,
+            "at least one main-content column survives"
+        );
+    }
+
+    #[test]
+    fn disabled_right_panel_reserves_no_width() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("clamp")];
+        app.active = Some(0);
+        app.right_panel_enabled = false;
+        app.right_panel_width = 30;
+
+        compute_view(&mut app, Rect::new(0, 0, 100, 10));
+
+        assert_eq!(app.view.right_panel_rect, Rect::default());
+        assert_eq!(
+            app.view.sidebar_rect.width + app.view.terminal_area.width,
+            100,
+            "the main content retains the otherwise reserved width"
+        );
+    }
+
+    #[test]
+    fn unresolved_topbar_leaves_the_sidebar_full_height() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("anchor")];
+        app.active = Some(0);
+        app.topbar_enabled = false;
+
+        compute_view(&mut app, Rect::new(0, 0, 100, 30));
+
+        assert_eq!(app.view.topbar_rect, Rect::default());
+        let sidebar = app.view.sidebar_rect;
+        assert_eq!(sidebar.y, 0);
+        assert_eq!(sidebar.y + sidebar.height, 30);
     }
 
     #[test]

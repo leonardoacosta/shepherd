@@ -27,12 +27,25 @@ Shepherd SHALL expose desktop topbar and dock presentation through the existing 
 - **AND** changing them SHALL NOT add mobile topbar or dock geometry
 
 ### Requirement: Topbar renders configured rows and Agent tokens
-An enabled desktop topbar SHALL render the nonempty rows declared by `ui.topbar.rows` using the documented Agent-sidebar token vocabulary and styling rules.
+An enabled desktop topbar SHALL render the nonempty rows declared by `ui.topbar.rows` using the
+documented Agent-sidebar token vocabulary and styling rules. The topbar SHALL render as an
+extension of the Agent sidebar rather than as an independent region: the sidebar SHALL own the
+full-height left edge, and the topbar SHALL occupy the main-content width beside it.
+
+#### Scenario: Sidebar anchors the full terminal height
+- **WHEN** a desktop layout resolves at least one topbar row and the sidebar is visible
+- **THEN** the sidebar rectangle spans from the first terminal row to the last
+- **AND** the topbar rectangle begins at the sidebar's right edge
+
+#### Scenario: Topbar reserves no sidebar geometry
+- **WHEN** the topbar resolves no rows
+- **THEN** the topbar rectangle is empty
+- **AND** the sidebar rectangle still spans the full terminal height
 
 #### Scenario: Multiple rows render independently
 - **WHEN** two configured topbar rows each resolve at least one value
 - **THEN** Shepherd renders two distinct topbar lines in configured order
-- **AND** reserves two rows of desktop geometry
+- **AND** reserves two rows of main-content geometry beside the sidebar
 
 #### Scenario: Built-in tokens use the active main pane
 - **WHEN** the active workspace's main tab has a focused pane with state, tab, pane, agent, or terminal-title values
@@ -259,4 +272,44 @@ Shepherd SHALL make disabled-by-default chrome discoverable through executable d
 - **WHEN** the feature is authored before release
 - **THEN** English, Japanese, and Chinese preview configuration pages and `docs/next/CHANGELOG.md` are updated together
 - **AND** stable website docs, root README, root changelog, and `website/latest.json` remain unchanged
+
+### Requirement: Chrome panels render on either side edge
+Shepherd SHALL support a right chrome panel that renders configured token rows using the same
+Agent-sidebar renderer, token vocabulary, and styling rules as the left sidebar. A chrome panel is
+a token-driven region and SHALL NOT host a terminal runtime.
+
+#### Scenario: Right panel renders configured rows
+- **WHEN** a right chrome panel is enabled with rows that resolve at least one value
+- **THEN** Shepherd reserves the configured width on the right edge
+- **AND** renders those rows using the Agent-sidebar token vocabulary
+
+#### Scenario: Right panel elides absent values
+- **WHEN** a configured right-panel token has no value
+- **THEN** Shepherd omits that token and its separator
+- **AND** omits the complete row when none of its tokens resolve
+
+#### Scenario: Both side panels enabled
+- **WHEN** the left sidebar and the right chrome panel are both visible
+- **THEN** both span the full terminal height
+- **AND** Shepherd clamps their widths to preserve at least one main-content column
+
+#### Scenario: Right panel disabled or unresolvable
+- **WHEN** the right chrome panel is disabled or resolves no rows
+- **THEN** its rectangle is empty
+- **AND** the main content retains the otherwise reserved width
+
+### Requirement: Dock is a terminal host distinct from chrome panels
+The spec SHALL describe the dock as an auxiliary terminal region and SHALL NOT present it as a
+chrome panel. A dock hosts a live terminal runtime and routes focus to it; a chrome panel renders
+resolved tokens and accepts no focus.
+
+#### Scenario: Dock and right chrome panel coexist
+- **WHEN** a right-side dock and a right chrome panel are both enabled
+- **THEN** Shepherd reserves geometry for both on that edge
+- **AND** clamps their combined size to preserve at least one main-content column
+
+#### Scenario: Chrome panel rejects terminal semantics
+- **WHEN** a chrome panel region is computed
+- **THEN** Shepherd allocates no terminal runtime for it
+- **AND** the panel takes no part in focus routing or backing-tab state
 

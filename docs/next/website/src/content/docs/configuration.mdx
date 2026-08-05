@@ -280,9 +280,13 @@ Color values accept hex, named colors, `rgb(r,g,b)`, or reset aliases like `rese
 
 The sidebar is the main Shepherd dashboard. Search `ui.` in the [Config reference](/docs/config-reference/) for sizing, collapsed mode, Agent panel ordering, mouse behavior, pane borders, and other presentation settings.
 
-### Topbar and dock
+### Chrome panels and dock
 
-The optional topbar and plugin dock are desktop-only workspace chrome. They do not reserve space in the mobile single-column layout.
+The optional topbar, right chrome panel, and plugin dock are desktop-only workspace chrome. They do not reserve space in the mobile single-column layout.
+
+Chrome panels and the dock are different things. A chrome panel renders resolved tokens, hosts no terminal, and accepts no focus. The dock hosts a live terminal runtime and routes focus to it.
+
+The sidebar anchors the full-height left edge. The topbar continues from it across the main content only, so an enabled topbar no longer pushes the sidebar down. Existing `[ui.topbar] rows` values stay valid — only the region the topbar renders into moves, and no token changed.
 
 Configure one or more topbar rows with the Agent sidebar token vocabulary:
 
@@ -296,6 +300,20 @@ rows = [
 ```
 
 Each inner array is one line. Empty tokens and separators disappear, and a completely empty line takes no space. Built-ins such as `state_icon`, `state_text`, `tab`, `pane`, `agent`, and terminal-title tokens use the focused pane in the active main tab; dock focus does not replace that context. `workspace` uses the active workspace. For a custom `$name`, workspace metadata wins and focused-main-pane metadata is the fallback. Inline `fg`, `bold`, and `dim` styles and separator behavior match Agent sidebar rows. Shepherd clips the resolved rows when necessary so at least one desktop body row remains.
+
+A right chrome panel takes the same token vocabulary and spans the full terminal height on the opposite edge:
+
+```toml
+[ui.right_panel]
+enabled = true
+width = 24
+rows = [
+  ["state_icon", "agent"],
+  [{ token = "$summary", dim = true }],
+]
+```
+
+`width` is the reserved column count. Shepherd clamps both side panels so at least one main-content column survives, and a panel that resolves no rows reserves nothing at all. Row, token, elision, and styling behavior are identical to the topbar — there is one token vocabulary and one resolver.
 
 Enable and position the workspace-scoped plugin dock separately:
 

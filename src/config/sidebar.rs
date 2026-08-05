@@ -7,6 +7,7 @@ use crate::detect::Agent;
 const MAX_SIDEBAR_ROWS: usize = 16;
 const MAX_SIDEBAR_TOKENS_PER_ROW: usize = 16;
 const DEFAULT_SIDEBAR_ROW_GAP: u16 = 0;
+const DEFAULT_RIGHT_PANEL_WIDTH: u16 = 24;
 
 fn deserialize_sidebar_rows<'de, D, T>(deserializer: D) -> Result<Vec<Vec<T>>, D::Error>
 where
@@ -431,9 +432,85 @@ pub struct SidebarConfig {
     pub spaces: SpacesSidebarConfig,
 }
 
+/// Right chrome panel. Modelled on `SpacesSidebarConfig` rather than `DockConfig`: it is a
+/// token-driven region, not a terminal host, so it carries rows instead of a `side`/`size` pair.
+/// Its rows share the topbar's `AgentSidebarToken` vocabulary — there is one vocabulary.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RightPanelConfig {
+    pub enabled: bool,
+    pub width: u16,
+    #[serde(deserialize_with = "deserialize_sidebar_rows")]
+    pub rows: AgentSidebarRows,
+}
+
+impl Default for RightPanelConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            width: DEFAULT_RIGHT_PANEL_WIDTH,
+            rows: vec![vec![AgentSidebarToken::Workspace]],
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn right_panel_defaults_to_disabled_and_reserves_no_width() {
+        let config = crate::config::Config::default();
+        assert!(
+            !config.ui.right_panel.enabled,
+            "an unset right panel must not render"
+        );
+
+        // A disabled panel reserves nothing regardless of its configured width, so the
+        // default width is inert until `enabled` is set.
+        let reserved = if config.ui.right_panel.enabled {
+            config.ui.right_panel.width
+        } else {
+            0
+        };
+        assert_eq!(reserved, 0);
+    }
+
+    #[test]
+    fn right_panel_parses_agent_tokens_and_rejects_unknown_fields() {
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[ui.right_panel]
+enabled = true
+width = 30
+rows = [["state_icon", "workspace"], [{ token = "agent", bold = true }, "$model"]]
+"#,
+        )
+        .expect("right panel config");
+
+        assert!(config.ui.right_panel.enabled);
+        assert_eq!(config.ui.right_panel.width, 30);
+        assert_eq!(config.ui.right_panel.rows.len(), 2);
+        assert_eq!(
+            config.ui.right_panel.rows[0],
+            vec![AgentSidebarToken::StateIcon, AgentSidebarToken::Workspace]
+        );
+        let (token, style) = config.ui.right_panel.rows[1][0].parts();
+        assert_eq!(token, &AgentSidebarToken::Agent);
+        assert_eq!(style.bold, Some(true));
+        assert_eq!(
+            config.ui.right_panel.rows[1][1],
+            AgentSidebarToken::Custom("model".into())
+        );
+
+        let unknown = toml::from_str::<crate::config::Config>(
+            "[ui.right_panel]\nenabled = true\nside = \"right\"\n",
+        );
+        assert!(
+            unknown.is_err(),
+            "a chrome panel takes no dock-style `side` field"
+        );
+    }
 
     #[test]
     fn defaults_match_the_compact_agent_and_existing_space_layouts() {

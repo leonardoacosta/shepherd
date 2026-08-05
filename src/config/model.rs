@@ -5,8 +5,8 @@ use serde::{de, Deserialize, Deserializer, Serialize};
 
 use super::{
     ActionKeybinds, BindingConfig, CommandKeybindConfig, DockConfig, IndexedKeybind, Keybinds,
-    SidebarConfig, SoundConfig, ThemeConfig, TopbarConfig, DEFAULT_MOBILE_WIDTH_THRESHOLD,
-    DEFAULT_MOUSE_SCROLL_LINES, DEFAULT_SCROLLBACK_LIMIT_BYTES,
+    RightPanelConfig, SidebarConfig, SoundConfig, ThemeConfig, TopbarConfig,
+    DEFAULT_MOBILE_WIDTH_THRESHOLD, DEFAULT_MOUSE_SCROLL_LINES, DEFAULT_SCROLLBACK_LIMIT_BYTES,
 };
 
 pub const MAX_TOAST_DELAY_SECONDS: u64 = 3600;
@@ -776,6 +776,8 @@ pub struct WorktreesConfig {
 #[serde(default)]
 pub struct UiConfig {
     pub topbar: TopbarConfig,
+    /// Right chrome panel. Token-driven like the topbar; not a terminal host like the dock.
+    pub right_panel: RightPanelConfig,
     pub dock: DockConfig,
     pub sidebar_width: u16,
     /// Minimum sidebar width (columns) when expanded. Default: 18.
@@ -998,6 +1000,7 @@ impl Default for UiConfig {
     fn default() -> Self {
         Self {
             topbar: TopbarConfig::default(),
+            right_panel: RightPanelConfig::default(),
             dock: DockConfig::default(),
             sidebar_width: 26,
             sidebar_min_width: 18,

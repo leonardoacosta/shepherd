@@ -66,8 +66,16 @@ fn active_main_entry(app: &AppState) -> Option<AgentPanelEntry> {
     Some(entry)
 }
 
-pub(super) fn resolved_rows(app: &AppState) -> Vec<Vec<ResolvedToken>> {
-    if !app.topbar_enabled {
+/// Both chrome panels — the topbar and the right panel — resolve the same
+/// `AgentSidebarToken` rows against the active main pane through the sidebar's own
+/// resolver. One vocabulary, one resolver; a second copy is what this module exists to
+/// prevent (`anchor-chrome-to-sidebar` design.md, Decision 2).
+fn resolved_chrome_rows(
+    app: &AppState,
+    enabled: bool,
+    rows: &[Vec<crate::config::AgentSidebarToken>],
+) -> Vec<Vec<ResolvedToken>> {
+    if !enabled {
         return Vec::new();
     }
     let Some(entry) = active_main_entry(app) else {
@@ -78,17 +86,37 @@ pub(super) fn resolved_rows(app: &AppState) -> Vec<Vec<ResolvedToken>> {
         .get(sidebar::agent_panel_status_key(entry.state, entry.seen))
         .map(String::as_str)
         .unwrap_or_else(|| state_label(entry.state, entry.seen));
-    sidebar::tokens::agent_rows_from(&app.topbar_rows, &entry, state_text)
+    sidebar::tokens::agent_rows_from(rows, &entry, state_text)
+}
+
+pub(super) fn resolved_rows(app: &AppState) -> Vec<Vec<ResolvedToken>> {
+    resolved_chrome_rows(app, app.topbar_enabled, &app.topbar_rows)
+}
+
+pub(super) fn resolved_right_panel_rows(app: &AppState) -> Vec<Vec<ResolvedToken>> {
+    resolved_chrome_rows(app, app.right_panel_enabled, &app.right_panel_rows)
+}
+
+pub(super) fn render_right_panel(app: &AppState, frame: &mut Frame, area: Rect) {
+    render_chrome_rows(app, frame, area, resolved_right_panel_rows(app));
 }
 
 pub(super) fn render_topbar(app: &AppState, frame: &mut Frame, area: Rect) {
+    render_chrome_rows(app, frame, area, resolved_rows(app));
+}
+
+fn render_chrome_rows(
+    app: &AppState,
+    frame: &mut Frame,
+    area: Rect,
+    rows: Vec<Vec<ResolvedToken>>,
+) {
     if area.is_empty() {
         return;
     }
     let Some(entry) = active_main_entry(app) else {
         return;
     };
-    let rows = resolved_rows(app);
     let label_color = state_label_color(entry.state, entry.seen, &app.palette);
     for (row_idx, row) in rows.iter().take(area.height as usize).enumerate() {
         let spans = sidebar::resolved_token_spans(
@@ -234,6 +262,66 @@ rows = [
         );
         let styled = terminal.backend().buffer()[(0, 0)].style();
         assert!(styled.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn right_panel_resolves_tokens_elides_absent_values_and_omits_empty_rows() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("right-panel-ws")];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.terminals
+            .get_mut(&terminal_id)
+            .expect("terminal")
+            .detected_agent = Some(crate::detect::Agent::Codex);
+        app.right_panel_enabled = true;
+
+        // A row whose every token elides is omitted; the populated row survives.
+        app.right_panel_rows = vec![
+            vec![AgentSidebarToken::Workspace, AgentSidebarToken::Agent],
+            vec![AgentSidebarToken::Custom("missing".into())],
+        ];
+        let rows = resolved_right_panel_rows(&app);
+        assert_eq!(rows.len(), 1, "fully unresolved row must be omitted");
+        assert_eq!(rows[0].len(), 2, "both populated tokens resolve");
+
+        // An absent token elides individually, taking its separator with it.
+        app.right_panel_rows = vec![vec![
+            AgentSidebarToken::Workspace,
+            AgentSidebarToken::Custom("missing".into()),
+        ]];
+        let rows = resolved_right_panel_rows(&app);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].len(), 1, "absent token elides inside the row");
+
+        let mut terminal = Terminal::new(TestBackend::new(20, 4)).expect("test terminal");
+        terminal
+            .draw(|frame| render_right_panel(&app, frame, Rect::new(0, 0, 20, 4)))
+            .expect("right panel render");
+        let first_row = (0..20)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(first_row.contains("right-panel-ws"), "{first_row:?}");
+        assert!(
+            !first_row.contains('·'),
+            "no separator survives an elided token: {first_row:?}"
+        );
+    }
+
+    #[test]
+    fn right_panel_disabled_resolves_no_rows() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("right-panel-ws")];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+        app.right_panel_enabled = false;
+        app.right_panel_rows = vec![vec![AgentSidebarToken::Workspace]];
+
+        assert!(resolved_right_panel_rows(&app).is_empty());
     }
 
     #[test]
