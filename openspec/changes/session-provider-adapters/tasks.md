@@ -29,16 +29,34 @@ section 7 shrinks the companion to what only it can do.
 
 ## 3. Absorb the credential and account readers
 
-- [ ] 3.1 Port `pkg/credentials`' file layout and parsing into a pure parser in
-      `src/workspace/session_status.rs`. Read-only: no write path moves.
+Per `proposal.md` `## Decisions` "`local-account-signal` polling and refresh": tasks 3.1-3.4
+below are read-only (`credentials.jsonl`/`usage.json`/`active` parsing and the accounts domain
+type). Tasks 3.5-3.9 are the exception that decision carves out — Shepherd absorbing
+`Mutator.PollUsage` and `Mutator.Refresh` is a write path, not a reader.
+
+- [ ] 3.1 Port `pkg/credentials`' file layout and parsing (`credentials.jsonl`, `usage.json`,
+      `active`) into a pure parser in `src/workspace/session_status.rs`, plus `Decrypt`'s
+      AES-256-GCM envelope (key from `NEXUS_ENCRYPTION_KEY`, ported from `crypto.go` unchanged).
 - [ ] 3.2 Port `pkg/accounts`' dedup and active-resolution into a domain type over that parser's
       output. Its input is the credential parser's result, not a second read.
-- [ ] 3.3 Add the adapter, its demand disjunct, and its snapshot field.
-- [ ] 3.4 Add a test asserting no credential secret reaches a rendered token, a log, or an error
+- [ ] 3.3 Add a test asserting no credential secret reaches a rendered token, a log, or an error
       message — only derived counts, quotas, and times.
-- [ ] 3.5 Add a test asserting the source is opened read-only and is byte-identical afterwards.
-- [ ] 3.6 Add degradation tests: source absent, unreadable, unparseable, and partially malformed.
-- [ ] 3.7 Run `cargo nextest run credential` and paste the passing output.
+- [ ] 3.4 Add degradation tests: source absent, unreadable, unparseable, partially malformed, and
+      a `NEXUS_ENCRYPTION_KEY` that is unset, non-hex, or the wrong size.
+- [ ] 3.5 Port `Mutator.PollUsage`'s live usage-endpoint call (`probeUsage`, `usageURL`, response
+      parsing) as a provider adapter — same `run_provider`-adjacent shape as the spawn-based
+      chrome sources, but an HTTP call instead of a subprocess.
+- [ ] 3.6 Port `Mutator.Refresh`'s OAuth token-endpoint call (`callRefreshGrant`, `needsRefresh`)
+      so an expired access token is refreshed before the usage poll, not elided.
+- [ ] 3.7 Port the write-back: a successful refresh re-encrypts the new token and persists it to
+      `credentials.jsonl` via the same atomic-write contract as `writeFileAtomic` (temp file in
+      the same dir, fsync, rename). Do not touch `usage.json`'s or `active`'s write paths — those
+      remain the companion's (`pkg/snapshot`'s neighbors, not `pkg/credentials`').
+- [ ] 3.8 Add the adapter, its demand disjunct, and its snapshot field.
+- [ ] 3.9 Add tests for the poll/refresh/write-back path: a refresh call that succeeds and
+      persists, one that fails and leaves the prior token intact, and a test asserting the
+      encrypted envelope round-trips (encrypt-then-decrypt, not just decrypt-a-fixture).
+- [ ] 3.10 Run `cargo nextest run credential` and paste the passing output.
 
 ## 4. Absorb the transcript reader
 

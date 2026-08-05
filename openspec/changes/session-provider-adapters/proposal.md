@@ -208,6 +208,19 @@ projection path.
 - Credential reading — chosen: accepted. Shepherd gains the ability to read credential material it
   does not touch today. Surfaced before the decision rather than discovered during it;
   decided-by: leo
+- `local-account-signal` polling and refresh — chosen: **Shepherd fully absorbs
+  `Mutator.PollUsage` and `Mutator.Refresh`.** `quota_remaining`/`reset_at` are not a file read:
+  the companion's `pkg/credentials` computes them by decrypting the active credential's OAuth
+  blob (AES-256-GCM under `NEXUS_ENCRYPTION_KEY`) and making a live authenticated HTTP call to
+  the provider's usage endpoint, refreshing the access token first when it is expired. Shepherd
+  takes over both — decrypt, poll, and (on an expired token) call the provider's OAuth token
+  endpoint and persist the refreshed value back to `credentials.jsonl`, re-encrypted. This
+  **supersedes task 3.1's "read-only: no write path moves"** for this one source only; every
+  other section-3/4/5 reader (accounts, transcript, pricing, severity) stays read-only as
+  written. Rejected: read-only poll that elides on an expired token, which would make
+  `local-account-signal` go silently stale the moment nothing else in the system still refreshes
+  tokens (section 7 removes the companion's own refresh path along with the rest of
+  `pkg/credentials`). decided-by: leo
 - Pricing table ownership — chosen: Shepherd carries the model rate table and it goes stale on
   Shepherd's release cadence rather than the companion's. Rejected: leaving pricing in the
   companion, which would split one derivation across two processes for one table; decided-by: leo
