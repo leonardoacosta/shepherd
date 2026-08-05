@@ -282,6 +282,25 @@ projection path.
   scoped) or keeps them, (2) decide whether `internal/adapter/claude` and `internal/engine`'s
   chrome-projection code move, get deleted, or stay, and (3) only then re-derive which packages
   (if any) are actually safe to delete. decided-by: leo
+
+  **Follow-up pass, resolved (2026-08-05), decided-by: leo:**
+  1. `shepherd-token-tab` is deprecated. It no longer blocks deleting `pkg/credentials`,
+     `pkg/accounts`, `pkg/severity`, or `pkg/transcript` on its own account.
+  2. `internal/adapter/claude.Reader.Read`'s transcript/pricing read is stripped from hook
+     ingest entirely — the ingested snapshot no longer carries token/cost/context fields sourced
+     this way, since Shepherd now reads the transcript itself for its own tokens. This unblocks
+     `pkg/transcript` and `pkg/pricing`.
+  3. `internal/engine.go`'s `ProjectChromeSnapshot` is edited so `pkg/chrome` can be deleted —
+     task 7.2's blanket protection of `internal/engine` is revoked for this one projection path;
+     the rest of `internal/engine` (the authority matrix, non-chrome projections) is still not
+     this change's to alter.
+
+  With all three resolved, every package task 7.1 lists (`pkg/chrome`, `pkg/credentials`,
+  `pkg/accounts`, `pkg/pricing`, `pkg/transcript`, `pkg/severity`) is now safe to delete, once
+  the two consumer edits above (ingest strip, engine.go chrome-projection removal) land and pass
+  the companion's own test suite. `shepherd-token-tab` itself still needs its own deprecation
+  action decided at implementation time (remove the tool outright vs. mark-and-stop-shipping) —
+  see `tasks.md` section 7 for the concrete plan.
 - Pricing table ownership — chosen: Shepherd carries the model rate table and it goes stale on
   Shepherd's release cadence rather than the companion's. Rejected: leaving pricing in the
   companion, which would split one derivation across two processes for one table; decided-by: leo

@@ -156,41 +156,40 @@ surface (`classify_tier`/`resolve_color`/pulsing base/pulse colors), which needs
 
 ## 7. Shrink the companion
 
-**BLOCKED — do not implement from the tasks below as written.** Per `proposal.md` `## Decisions`
-"Section 7 companion-shrink scope" (2026-08-05): checking the actual `shepherd-plugins` import
-graph instead of trusting each package's doc comment found `pkg/credentials`, `pkg/accounts`,
-`pkg/transcript`, and `pkg/severity` imported by the separate `shepherd-token-tab` tool;
-`pkg/transcript` and `pkg/pricing` imported by `internal/adapter/claude.Reader.Read`, part of the
-ingest path task 7.2 protects; and `pkg/chrome` imported by `internal/engine.go`, one of the four
-files task 7.2 explicitly says stays untouched — task 7.1 and 7.2 contradict each other for that
-package. Only `pkg/pricing` has no direct `shepherd-token-tab` import, and even it is blocked
-transitively through `pkg/transcript`. A follow-up pass must resolve `shepherd-token-tab`'s
-status and the ingest/engine entanglement before any deletion is safe; see the Decisions entry
-for the three open questions.
+**Unblocked and implemented (2026-08-05)**, once the three follow-up decisions recorded in
+`proposal.md` `## Decisions` "Section 7 companion-shrink scope" landed: `shepherd-token-tab` is
+deprecated (deleted entirely, not just marked), `internal/adapter/claude.Reader.Read`'s
+transcript/pricing read is stripped from hook ingest, and `internal/engine.go`'s chrome
+projection is removed. Implemented in `shepherd-plugins`, committed locally
+(`cf13e9a`, "chore: remove shepherd-token-tab and hollow out shepherd-state chrome/accounts
+telemetry") — **not pushed**, per that repo's own conservative git default; pushing is Leo's
+call, not this pass's.
 
-- [ ] 7.1 In `shepherd-plugins`, remove `pkg/chrome`, `pkg/credentials`, `pkg/accounts`,
-      `pkg/pricing`, `pkg/transcript`, and `pkg/severity`, plus the subcommands that existed only
-      to expose them. **Not executed — blocked, see note above.**
-- [ ] 7.2 Leave `hooks.json`, `internal/engine`, `pkg/snapshot`, and `internal/shepherd` untouched.
-      The authority matrix and the snapshot merge semantics are not this change's to alter.
-- [ ] 7.3 Make each removed subcommand exit with a usage error naming Shepherd as the owner of that
-      fact, rather than vanishing silently. **Not executed — blocked, see note above.**
-- [ ] 7.4 Run the companion's own test suite and paste the passing output. **Not run — nothing to
-      verify until 7.1 is unblocked.**
+- [x] 7.1 In `shepherd-plugins`, remove `pkg/chrome`, `pkg/accounts`, `pkg/pricing`,
+      `pkg/transcript`, and `pkg/severity`, plus the subcommands that existed only to expose them.
+      `pkg/credentials` is the one exception: `shepherd-state import`, a live, unrelated one-time
+      Postgres→local credential migration subcommand nothing in this change's scope authorized
+      removing, still depends on it directly. Also deleted `plugins/shepherd-token-tab` entirely
+      (the deprecation target itself) plus its openspec spec and docs.
+- [x] 7.2 Leave `hooks.json`, `pkg/snapshot`, and `internal/shepherd` untouched. `internal/engine`
+      is untouched except for the one narrow, surgical removal decision 3 authorized
+      (`ProjectChromeSnapshot` and its chrome-exclusive helpers) — the authority matrix,
+      `Process`, `authorityFor`, and harness lifecycle/metadata reporting are unchanged.
+- [x] 7.3 The `chrome` and `accounts` subcommands now print a usage error naming Shepherd as the
+      owner of that fact and exit 1, rather than vanishing silently.
+- [x] 7.4 Ran the companion's own test suite and pasted the passing output.
+      `go build ./... && go vet ./... && go test ./... -count=1` in `plugins/shepherd-state`:
+      11 packages, all `ok` (independently re-verified 2026-08-05, not just the dispatched
+      agent's own claim).
 
 ## 8. Land the dependency amendment
 
-Independent of section 7's blocker in principle (the metadata-transport requirement amendment
-doesn't require deleting any package), but left undone alongside it this pass — landing a spec
-amendment in a repo whose own companion-shrink plan turned out to need rework is premature; the
-amendment's wording may need to change too once section 7's real scope is known.
-
-- [ ] 8.1 In `shepherd-plugins`, amend `shepherd-chrome`'s requirement "Chrome values reuse
+- [x] 8.1 In `shepherd-plugins`, amended `shepherd-chrome`'s requirement "Chrome values reuse
       metadata transport" so its prohibition scopes to the feed's own projection path and does not
-      forbid a consumer resolving a value for itself. Cite this proposal. **Not executed.**
-- [ ] 8.2 Confirm the amended requirement and this change agree: the feed still MUST NOT add a
-      second transport of its own, and Shepherd pulling is not the feed adding one. **Not
-      executed.**
+      forbid a consumer resolving a value for itself. Cites this proposal by name.
+- [x] 8.2 Confirmed the amended requirement and this change agree: the feed still MUST NOT add a
+      second transport of its own, and Shepherd pulling is not the feed adding one — the amended
+      text says exactly this.
 
 ## 9. Verify the boundary holds
 
@@ -212,10 +211,15 @@ amendment's wording may need to change too once section 7's real scope is known.
       state dir) elided cleanly with no error dialog and no gap/placeholder in the row, while
       `sessions`'s three tokens rendered their real values in the same row.
 - [ ] 9.3 Trigger a real harness session-start hook and confirm a snapshot is still persisted and
-      lifecycle metadata still reported — the ingest half must be unaffected. **Not run.** Section
-      7 (the only work that could affect the ingest path) was not implemented this pass (blocked,
-      see section 7's note) — nothing in the ingest half has changed yet, so there is nothing new
-      to verify here until 7 actually lands.
+      lifecycle metadata still reported — the ingest half must be unaffected. **Not done as
+      written.** Weaker evidence gathered instead (2026-08-05): the rebuilt `shepherd-state`
+      binary was run live against the real running Shepherd socket (`shepherd-state doctor` → all
+      PASS/WARN rows as expected, socket ping ok, no crash, no reference to the removed
+      credential-sources row) plus the full `go test ./...` suite covering hook/lifecycle mapping
+      and the narrowed `claude.Reader.Read`. An actual live Claude Code `SessionStart` firing
+      through the real hook path with a real `SHEPHERD_PANE_ID` was not attempted — this session
+      had no live pane id to fire against without risking writing synthetic state into Leo's real
+      running server.
 - [x] 9.4 Run `just check` and paste the passing output. 3348 tests run: 3348 passed, 0 skipped;
       fmt clean; clippy clean (incl. Windows target); `scripts.test_config_reference_check` and
       the other 12 python maintenance suites pass (2026-08-05).
@@ -230,7 +234,8 @@ amendment's wording may need to change too once section 7's real scope is known.
 - [x] 10.2 Add a `docs/next/CHANGELOG.md` entry naming the per-source independence, the facts
       Shepherd now resolves itself, and that the companion remains required for harness hook
       ingest.
-- [ ] 10.3 Update the companion's own README and plugin description so it no longer claims the
-      responsibilities that moved. **Not executed — depends on section 7, which is blocked.**
-      Nothing has actually moved out of the companion yet (section 7's packages are all still
-      there), so updating its README to claim otherwise would be inaccurate.
+- [x] 10.3 Updated the companion's own README so it no longer claims the responsibilities that
+      moved: removed all `shepherd-token-tab` references, rewrote the sidebar-metadata and
+      focused-session-helper-pane sections to match reality. Also updated the `shepherd-state` and
+      `shepherd-product-identity` openspec specs in `shepherd-plugins` to drop
+      requirements/references describing the now-deleted architecture.
