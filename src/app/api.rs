@@ -71,6 +71,9 @@ impl App {
             AppEvent::SessionStatusRefreshed { results } => {
                 self.handle_session_status_refreshed(results)
             }
+            AppEvent::TerminalTranscriptRefreshed { results } => {
+                self.handle_terminal_transcript_refreshed(results)
+            }
             ev => {
                 self.handle_internal_event(ev);
                 true
@@ -139,6 +142,27 @@ impl App {
         changed
     }
 
+    fn handle_terminal_transcript_refreshed(
+        &mut self,
+        results: Vec<(
+            crate::terminal::TerminalId,
+            Option<crate::workspace::TranscriptUsage>,
+        )>,
+    ) -> bool {
+        let changed = results.iter().any(|(terminal_id, status)| {
+            self.state
+                .terminals
+                .get(terminal_id)
+                .is_some_and(|terminal| terminal.cached_transcript_status != *status)
+        });
+        self.apply_terminal_transcript_results(results);
+        if changed {
+            self.render_dirty.store(true, Ordering::Release);
+            self.render_notify.notify_one();
+        }
+        changed
+    }
+
     pub(crate) fn handle_internal_event(&mut self, ev: AppEvent) {
         if let AppEvent::ClipboardWrite { content } = ev {
             #[cfg(not(test))]
@@ -181,6 +205,11 @@ impl App {
 
         if let AppEvent::SessionStatusRefreshed { results } = ev {
             self.handle_session_status_refreshed(results);
+            return;
+        }
+
+        if let AppEvent::TerminalTranscriptRefreshed { results } = ev {
+            self.handle_terminal_transcript_refreshed(results);
             return;
         }
 

@@ -147,6 +147,27 @@ pub enum AgentSidebarToken {
     /// Renders only when the session's context occupancy has crossed the handoff threshold.
     /// Same source and derivation as `context_occupancy_pct`.
     ContextHandoffWarning,
+    /// Estimated USD cost of the pane's Claude Code transcript, resolved by Shepherd reading
+    /// the transcript file directly. `transcript` source — scoped to one running process, not a
+    /// checkout, unlike every other session-provider token.
+    TranscriptCost,
+    /// Cumulative input tokens from the pane's Claude Code transcript. `transcript` source.
+    TranscriptInputTokens,
+    /// Cumulative output tokens from the pane's Claude Code transcript. `transcript` source.
+    TranscriptOutputTokens,
+    /// Cumulative cache-read tokens from the pane's Claude Code transcript. `transcript` source.
+    TranscriptCacheReadTokens,
+    /// Cumulative cache-write tokens from the pane's Claude Code transcript. `transcript`
+    /// source.
+    TranscriptCacheWriteTokens,
+    /// The final assistant message's resident context size (not a cumulative sum) from the
+    /// pane's Claude Code transcript. `transcript` source.
+    TranscriptLastContextTokens,
+    /// How many turns are in the pane's Claude Code transcript. `transcript` source.
+    TranscriptMessageCount,
+    /// Wall-clock span from the transcript's first to last observed timestamp. `transcript`
+    /// source.
+    TranscriptDuration,
     Custom(String),
     Styled {
         token: Box<AgentSidebarToken>,
@@ -296,6 +317,14 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
         AgentSidebarToken::ResetAt => "reset_at".into(),
         AgentSidebarToken::ContextOccupancyPct => "context_occupancy_pct".into(),
         AgentSidebarToken::ContextHandoffWarning => "context_handoff_warning".into(),
+        AgentSidebarToken::TranscriptCost => "transcript_cost".into(),
+        AgentSidebarToken::TranscriptInputTokens => "transcript_input_tokens".into(),
+        AgentSidebarToken::TranscriptOutputTokens => "transcript_output_tokens".into(),
+        AgentSidebarToken::TranscriptCacheReadTokens => "transcript_cache_read_tokens".into(),
+        AgentSidebarToken::TranscriptCacheWriteTokens => "transcript_cache_write_tokens".into(),
+        AgentSidebarToken::TranscriptLastContextTokens => "transcript_last_context_tokens".into(),
+        AgentSidebarToken::TranscriptMessageCount => "transcript_message_count".into(),
+        AgentSidebarToken::TranscriptDuration => "transcript_duration".into(),
         AgentSidebarToken::Custom(name) => format!("${name}"),
         AgentSidebarToken::Styled { token, .. } => agent_token_name(token),
     }
@@ -370,6 +399,23 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
                 ("reset_at", Self::ResetAt),
                 ("context_occupancy_pct", Self::ContextOccupancyPct),
                 ("context_handoff_warning", Self::ContextHandoffWarning),
+                ("transcript_cost", Self::TranscriptCost),
+                ("transcript_input_tokens", Self::TranscriptInputTokens),
+                ("transcript_output_tokens", Self::TranscriptOutputTokens),
+                (
+                    "transcript_cache_read_tokens",
+                    Self::TranscriptCacheReadTokens,
+                ),
+                (
+                    "transcript_cache_write_tokens",
+                    Self::TranscriptCacheWriteTokens,
+                ),
+                (
+                    "transcript_last_context_tokens",
+                    Self::TranscriptLastContextTokens,
+                ),
+                ("transcript_message_count", Self::TranscriptMessageCount),
+                ("transcript_duration", Self::TranscriptDuration),
             ],
         )
         .map_err(serde::de::Error::custom)?;
@@ -629,6 +675,32 @@ rows = [["workspace", { token = "spend", dim = true }]]
                 "context_handoff_warning",
                 AgentSidebarToken::ContextHandoffWarning,
             ),
+            ("transcript_cost", AgentSidebarToken::TranscriptCost),
+            (
+                "transcript_input_tokens",
+                AgentSidebarToken::TranscriptInputTokens,
+            ),
+            (
+                "transcript_output_tokens",
+                AgentSidebarToken::TranscriptOutputTokens,
+            ),
+            (
+                "transcript_cache_read_tokens",
+                AgentSidebarToken::TranscriptCacheReadTokens,
+            ),
+            (
+                "transcript_cache_write_tokens",
+                AgentSidebarToken::TranscriptCacheWriteTokens,
+            ),
+            (
+                "transcript_last_context_tokens",
+                AgentSidebarToken::TranscriptLastContextTokens,
+            ),
+            (
+                "transcript_message_count",
+                AgentSidebarToken::TranscriptMessageCount,
+            ),
+            ("transcript_duration", AgentSidebarToken::TranscriptDuration),
         ];
 
         let mut seen_names = std::collections::HashSet::new();

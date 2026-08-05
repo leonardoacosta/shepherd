@@ -1180,6 +1180,7 @@ mod tests {
             state_labels: std::collections::HashMap::new(),
             tokens: std::collections::HashMap::new(),
             session_status: Default::default(),
+            transcript_status: None,
         }
     }
 

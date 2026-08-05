@@ -2969,6 +2969,7 @@ impl AppState {
             }
             AppEvent::ProjectStatusRefreshed { results: _ } => Vec::new(),
             AppEvent::SessionStatusRefreshed { results: _ } => Vec::new(),
+            AppEvent::TerminalTranscriptRefreshed { results: _ } => Vec::new(),
             AppEvent::WorktreeAddFinished(_) => Vec::new(),
             AppEvent::WorktreeRemoveFinished(_) => Vec::new(),
             AppEvent::PluginCommandFinished { .. } => Vec::new(),

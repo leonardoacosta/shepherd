@@ -151,6 +151,15 @@ pub enum AppEvent {
     SessionStatusRefreshed {
         results: Vec<crate::workspace::WorkspaceSessionStatus>,
     },
+    /// Background per-terminal Claude Code transcript usage refresh completed. Keyed by
+    /// `TerminalId` rather than workspace: transcript usage belongs to one running process, not
+    /// a checkout, so it cannot share `SessionStatusRefreshed`'s per-workspace shape.
+    TerminalTranscriptRefreshed {
+        results: Vec<(
+            crate::terminal::TerminalId,
+            Option<crate::workspace::TranscriptUsage>,
+        )>,
+    },
     /// A plugin action or event command finished.
     PluginCommandFinished {
         log_id: String,

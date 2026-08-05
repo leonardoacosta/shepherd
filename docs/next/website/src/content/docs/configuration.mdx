@@ -401,6 +401,14 @@ Agent rows accept these built-in tokens:
 - `reset_at` — the earliest cooldown reset time among locally tracked accounts on cooldown.
 - `context_occupancy_pct` — the session's context-window occupancy as a whole percent, e.g. `62%`. A pure derivation over `context_tokens`/`context_window_tokens` above — it reads no source of its own and elides under the same conditions those two do.
 - `context_handoff_warning` — renders only when the session's context occupancy has crossed the handoff threshold; otherwise the token elides, the same as an absent value.
+- `transcript_cost` — estimated USD cost of this pane's own Claude Code transcript, resolved by Shepherd reading the transcript file directly. Unlike every other session-provider token above, this one is per-pane rather than per-workspace: two panes in the same workspace can run different Claude Code sessions with different transcripts.
+- `transcript_input_tokens` — cumulative input tokens from this pane's transcript.
+- `transcript_output_tokens` — cumulative output tokens from this pane's transcript.
+- `transcript_cache_read_tokens` — cumulative cache-read tokens from this pane's transcript.
+- `transcript_cache_write_tokens` — cumulative cache-write tokens from this pane's transcript.
+- `transcript_last_context_tokens` — the final assistant message's resident context size (not a cumulative sum) from this pane's transcript.
+- `transcript_message_count` — how many turns are in this pane's transcript.
+- `transcript_duration` — wall-clock span from this pane's transcript's first to last observed timestamp.
 - `$name` — custom pane metadata named `name`.
 
 Space rows accept these built-in tokens:

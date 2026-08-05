@@ -60,6 +60,7 @@ fn active_main_entry(app: &AppState) -> Option<AgentPanelEntry> {
             .map(|terminal| terminal.metadata_tokens.values())
             .unwrap_or_default(),
         session_status: workspace.session_status(),
+        transcript_status: terminal.and_then(|terminal| terminal.cached_transcript_status.clone()),
     };
     for (name, value) in workspace.metadata_tokens.values() {
         entry.tokens.insert(name.clone(), value.clone());
@@ -375,6 +376,7 @@ mod presentation_layout_candidate {
             state_labels: std::collections::HashMap::new(),
             tokens: std::collections::HashMap::new(),
             session_status: Default::default(),
+            transcript_status: None,
         }
     }
 

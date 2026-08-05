@@ -163,6 +163,14 @@ pub struct TerminalState {
     fallback_visible_blocker: bool,
     fallback_observed_at: Option<Instant>,
     pub hook_authority: Option<HookAuthority>,
+    /// This terminal's Claude Code transcript usage, refreshed off the render path the same way
+    /// `Workspace::cached_session_status` is. Lives here rather than on `Workspace` because
+    /// transcript usage belongs to one running process, not a checkout — two panes in the same
+    /// workspace can run different Claude sessions with different transcripts. Lives here
+    /// rather than in a separate `HashMap<PaneId, _>` because `PaneState`'s own doc comment
+    /// says terminal identity and agent metadata belong in `TerminalState`, and because removing
+    /// this terminal removes its cache for free, with no separate cleanup path to get wrong.
+    pub cached_transcript_status: Option<crate::workspace::TranscriptUsage>,
     pub agent_metadata: HashMap<String, AgentMetadata>,
     pub metadata_tokens: crate::metadata_tokens::MetadataTokens,
     pub persisted_agent_session: Option<crate::agent_resume::PersistedAgentSession>,
@@ -196,6 +204,7 @@ impl TerminalState {
             fallback_visible_blocker: false,
             fallback_observed_at: None,
             hook_authority: None,
+            cached_transcript_status: None,
             agent_metadata: HashMap::new(),
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
             persisted_agent_session: None,

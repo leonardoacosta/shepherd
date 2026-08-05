@@ -387,6 +387,14 @@ Agent 行支持以下内置 token：
 - `reset_at` — 处于冷却状态的本地跟踪账户中，最早的冷却重置时间。
 - `context_occupancy_pct` — 会话上下文窗口占用率，以整数百分比表示，例如 `62%`。这是对上面 `context_tokens`/`context_window_tokens` 的纯派生值——不读取自己的数据源，省略条件与这两者相同。
 - `context_handoff_warning` — 仅当会话的上下文占用率超过交接阈值时才会渲染；否则该 token 会像未解析的值一样被省略。
+- `transcript_cost` — 该窗格自身 Claude Code 会话记录的预估美元成本，由 Shepherd 直接读取会话记录文件解析得出。与上面其他会话提供方 token 不同，这一项是按窗格而非按工作区解析的——同一工作区内的两个窗格可能运行不同的 Claude Code 会话，拥有不同的会话记录。
+- `transcript_input_tokens` — 该窗格会话记录的累计输入 token 数。
+- `transcript_output_tokens` — 该窗格会话记录的累计输出 token 数。
+- `transcript_cache_read_tokens` — 该窗格会话记录的累计缓存读取 token 数。
+- `transcript_cache_write_tokens` — 该窗格会话记录的累计缓存写入 token 数。
+- `transcript_last_context_tokens` — 该窗格会话记录中，最后一条助手消息的实际上下文大小（不是累计总和）。
+- `transcript_message_count` — 该窗格会话记录中包含的轮次数。
+- `transcript_duration` — 该窗格会话记录从首次到最后一次观测到的时间戳之间的持续时间。
 - `$name` — 名为 `name` 的自定义窗格元数据。
 
 Space 行支持以下内置 token：

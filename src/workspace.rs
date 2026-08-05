@@ -32,7 +32,9 @@ pub(crate) use self::{
     session_credentials::{
         derive_local_account_status, parse_credentials_jsonl, parse_usage_json, LocalAccountStatus,
     },
-    session_transcript::{munge_claude_path, parse_transcript_usage, TranscriptUsage},
+    session_transcript::{
+        munge_claude_path, parse_transcript_usage, render_duration_secs, TranscriptUsage,
+    },
     tab::MovedPane,
 };
 pub use self::{

@@ -299,6 +299,7 @@ impl App {
         self.start_git_status_refresh_if_due(now);
         self.start_project_status_refresh_if_due(now);
         self.start_session_status_refresh_if_due(now);
+        self.start_terminal_transcript_refresh_if_due(now);
 
         if self
             .next_auto_update_check

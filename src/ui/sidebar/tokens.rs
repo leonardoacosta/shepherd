@@ -185,6 +185,55 @@ pub(in crate::ui) fn agent_rows_from(
                                 crate::workspace::past_handoff(*tokens, *window)
                             })
                             .map(|_| ResolvedTokenKind::Custom("!".to_string())),
+                        // `transcript` source: per-pane, not per-workspace like every other
+                        // session-provider token (see `AgentPanelEntry.transcript_status`).
+                        AgentSidebarToken::TranscriptCost => entry
+                            .transcript_status
+                            .as_ref()
+                            .map(|t| {
+                                crate::workspace::render_spend_status(
+                                    crate::workspace::SpendStatus {
+                                        cents: t.cost_cents,
+                                    },
+                                )
+                            })
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::TranscriptInputTokens => entry
+                            .transcript_status
+                            .as_ref()
+                            .map(|t| t.input_tokens.to_string())
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::TranscriptOutputTokens => entry
+                            .transcript_status
+                            .as_ref()
+                            .map(|t| t.output_tokens.to_string())
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::TranscriptCacheReadTokens => entry
+                            .transcript_status
+                            .as_ref()
+                            .map(|t| t.cache_read_tokens.to_string())
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::TranscriptCacheWriteTokens => entry
+                            .transcript_status
+                            .as_ref()
+                            .map(|t| t.cache_write_tokens.to_string())
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::TranscriptLastContextTokens => entry
+                            .transcript_status
+                            .as_ref()
+                            .map(|t| t.last_context_tokens.to_string())
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::TranscriptMessageCount => entry
+                            .transcript_status
+                            .as_ref()
+                            .map(|t| t.message_count.to_string())
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::TranscriptDuration => entry
+                            .transcript_status
+                            .as_ref()
+                            .and_then(|t| t.duration_secs)
+                            .map(crate::workspace::render_duration_secs)
+                            .map(ResolvedTokenKind::Custom),
                         AgentSidebarToken::Custom(name) => entry
                             .tokens
                             .get(name)
@@ -303,6 +352,7 @@ mod tests {
             state_labels: std::collections::HashMap::new(),
             tokens: std::collections::HashMap::new(),
             session_status: Default::default(),
+            transcript_status: None,
         }
     }
 
@@ -525,6 +575,54 @@ mod tests {
             agent_rows(&config, &entry(), "working").is_empty(),
             "a fully unresolved row takes no space -- these are pure derivations, not a\
              separate source, but still elide with no context_tokens/context_window_tokens"
+        );
+    }
+
+    #[test]
+    fn transcript_tokens_render_from_the_panes_own_transcript_status() {
+        let config = AgentsSidebarConfig {
+            rows: vec![vec![
+                AgentSidebarToken::TranscriptCost,
+                AgentSidebarToken::TranscriptInputTokens,
+                AgentSidebarToken::TranscriptOutputTokens,
+                AgentSidebarToken::TranscriptCacheReadTokens,
+                AgentSidebarToken::TranscriptCacheWriteTokens,
+                AgentSidebarToken::TranscriptLastContextTokens,
+                AgentSidebarToken::TranscriptMessageCount,
+                AgentSidebarToken::TranscriptDuration,
+            ]],
+            ..Default::default()
+        };
+
+        let mut resolved = entry();
+        resolved.transcript_status = Some(crate::workspace::TranscriptUsage {
+            cost_cents: 250,
+            input_tokens: 1000,
+            output_tokens: 500,
+            cache_read_tokens: 2000,
+            cache_write_tokens: 3000,
+            last_context_tokens: 4000,
+            message_count: 2,
+            duration_secs: Some(125),
+            ..Default::default()
+        });
+        assert_eq!(
+            agent_rows(&config, &resolved, "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("$2.50".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("1000".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("500".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("2000".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("3000".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("4000".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("2".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("2m".into())),
+            ]]
+        );
+
+        assert!(
+            agent_rows(&config, &entry(), "working").is_empty(),
+            "a pane with no transcript_status takes no space"
         );
     }
 
@@ -875,6 +973,7 @@ mod presentation_layout_candidate {
             state_labels: std::collections::HashMap::new(),
             tokens: std::collections::HashMap::new(),
             session_status: Default::default(),
+            transcript_status: None,
         }
     }
 

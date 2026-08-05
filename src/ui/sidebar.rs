@@ -43,6 +43,10 @@ pub(crate) struct AgentPanelEntry {
     /// Carried on the entry for the same reason `SpaceTokenContext` carries project status:
     /// the row renderer resolves tokens and must never reach back into `AppState`.
     pub session_status: crate::workspace::SessionStatusSnapshot,
+    /// This entry's own pane's Claude Code transcript usage, resolved off the render path.
+    /// Per-pane rather than per-workspace like `session_status` above: two panes in the same
+    /// workspace can run different Claude sessions with different transcripts.
+    pub transcript_status: Option<crate::workspace::TranscriptUsage>,
 }
 
 /// `sort: grouped`/`sort: priority`, so the header identifies itself as a
@@ -145,6 +149,7 @@ fn collect_agent_panel_entries_with_runtimes(
                         state_labels: detail.state_labels,
                         tokens: detail.tokens,
                         session_status: ws.session_status(),
+                        transcript_status: detail.transcript_status,
                     }
                 })
         })

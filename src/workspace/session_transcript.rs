@@ -42,6 +42,21 @@ pub struct TranscriptUsage {
     pub tool_total: i64,
 }
 
+/// Renders a duration in seconds compactly: `"45s"` under a minute, `"12m"` under an hour,
+/// `"1h05m"` at or above an hour.
+pub fn render_duration_secs(duration_secs: i64) -> String {
+    let secs = duration_secs.max(0);
+    let hours = secs / 3600;
+    let minutes = (secs % 3600) / 60;
+    if hours > 0 {
+        format!("{hours}h{minutes:02}m")
+    } else if minutes > 0 {
+        format!("{minutes}m")
+    } else {
+        format!("{}s", secs % 60)
+    }
+}
+
 /// Converts a working directory into the directory name Claude Code uses under
 /// `~/.claude/projects`: every character outside `[A-Za-z0-9-]` is replaced by `-`.
 pub fn munge_claude_path(cwd: &str) -> String {
@@ -384,6 +399,18 @@ mod tests {
             "-home-ajavaherian-projects-TMM-Workflow"
         );
         assert_eq!(munge_claude_path("/tmp/a_b.c d"), "-tmp-a-b-c-d");
+    }
+
+    #[test]
+    fn render_duration_secs_picks_the_coarsest_useful_unit() {
+        assert_eq!(render_duration_secs(45), "45s");
+        assert_eq!(render_duration_secs(0), "0s");
+        assert_eq!(render_duration_secs(59), "59s");
+        assert_eq!(render_duration_secs(60), "1m");
+        assert_eq!(render_duration_secs(12 * 60 + 30), "12m");
+        assert_eq!(render_duration_secs(3600), "1h00m");
+        assert_eq!(render_duration_secs(3600 + 5 * 60), "1h05m");
+        assert_eq!(render_duration_secs(-5), "0s", "never negative");
     }
 
     /// A line tagged with `agentId` belongs to a subagent transcript intermixed in the same

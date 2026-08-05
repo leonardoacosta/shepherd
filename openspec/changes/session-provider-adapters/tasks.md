@@ -72,13 +72,17 @@ of scope for this proposal.
       `src/workspace/session_transcript.rs` (`munge_claude_path`, `parse_transcript_usage`,
       pure); `resolve_transcript_session_path` (I/O: stat + glob fallback) in
       `src/app/session_provider_refresh.rs`.
-- [ ] 4.2 Add the adapter, its demand disjunct, and its snapshot field. The adapter function
-      (`transcript_usage_for_session`) is landed but not yet called: transcript usage is keyed
-      by (checkout, session id), not by checkout alone like every other source in
-      `SessionStatusRefreshDemand`/`SessionStatusSnapshot` — wiring its demand disjunct and
-      snapshot field needs the refresh-loop's per-session-item restructuring, which task 6 does
-      alongside the vocabulary wiring rather than churning `SessionStatusRefreshItem`'s shape
-      twice. `#[allow(dead_code)]` marks the one still-unreferenced function.
+- [x] 4.2 Add the adapter, its demand disjunct, and its snapshot field. Landed via a dedicated
+      design pass (2026-08-05): transcript usage is keyed by (terminal, session id), not by
+      checkout like every other source, so it does not fit `SessionStatusRefreshDemand`/
+      `SessionStatusSnapshot` at all — instead it got its own sibling refresh loop,
+      `src/app/terminal_transcript_refresh.rs`, following the same
+      `git_refresh.rs`/`project_status_refresh.rs`/`session_provider_refresh.rs` shape but caching
+      onto `TerminalState.cached_transcript_status` (per-pane, matching where the codebase already
+      keeps agent metadata) instead of a checkout-keyed snapshot. `transcript_usage_for_session`
+      and its supporting path-resolution helpers moved from `session_provider_refresh.rs` into the
+      new file. Wired into `AppEvent`/`api.rs`/`actions.rs`/`runtime.rs`/`scheduled_tasks.rs`
+      following the existing `SessionStatusRefreshed` precedent exactly.
 - [x] 4.3 Add parser tests over captured transcript bodies, including a truncated final line, which
       a live transcript exhibits while a session is running.
 - [x] 4.4 Run `cargo nextest run transcript` and paste the passing output. 10 tests run: 10
@@ -106,24 +110,29 @@ Landed for the four chrome sources' 12 facts (`savings`, `cache_read_tokens`,
 inventory" table enumerates — plus 2 of severity's pure derivations that render as plain text
 over already-fetched `sessions` data (`context_occupancy_pct`, `context_handoff_warning`),
 landed in a follow-up pass once the design gap they'd been deferred for turned out to be
-narrower than first assessed (they don't need a colored/pulsing badge to be useful). **Still not
-landed**: tokens for transcript usage (blocked on the per-session refresh-loop restructuring
-noted at task 4.2 — a real architectural extension, not attempted this pass) and for pricing's
-cost derivation (needs transcript's token counts, so it inherits the same block). Severity's own
-remaining surface (`classify_tier`/`resolve_color`/pulsing base/pulse colors) still needs a new
-`ResolvedTokenKind` capable of carrying two colors, which stays deferred. Follow-up scope, not
-silently dropped.
+narrower than first assessed (they don't need a colored/pulsing badge to be useful). Also landed,
+via the task 4.2 design pass: 8 transcript-usage tokens (`transcript_cost`,
+`transcript_input_tokens`, `transcript_output_tokens`, `transcript_cache_read_tokens`,
+`transcript_cache_write_tokens`, `transcript_last_context_tokens`, `transcript_message_count`,
+`transcript_duration`) — per-pane rather than per-workspace, resolved from
+`TerminalState.cached_transcript_status`. `transcript_cost` exposes pricing's cost derivation for
+free, since `TranscriptUsage.cost_cents` already calls `session_pricing::cost()` internally, so no
+separate pricing token was needed. **Still not landed**: severity's own colored/pulsing-tier
+surface (`classify_tier`/`resolve_color`/pulsing base/pulse colors), which needs a new
+`ResolvedTokenKind` capable of carrying two colors. Follow-up scope, not silently dropped.
 
-- [ ] 6.1 Add the token names for every source and derivation to `AgentSidebarToken`, following
-      `spend`. Done for the four chrome sources' 12 facts plus `context_occupancy_pct`/
-      `context_handoff_warning`; transcript and pricing/severity's colored-tier surface deferred
-      per the note above.
-- [ ] 6.2 Extend demand resolution so each token enables only its own adapter, and add a demand
-      test per token. Done for the 14 landed tokens (one `each_token_enables_only_its_own_adapter`
+- [x] 6.1 Add the token names for every source and derivation to `AgentSidebarToken`, following
+      `spend`. Done for the four chrome sources' 12 facts, `context_occupancy_pct`/
+      `context_handoff_warning`, and the 8 transcript tokens; pricing/severity's colored-tier
+      surface deferred per the note above.
+- [x] 6.2 Extend demand resolution so each token enables only its own adapter, and add a demand
+      test per token. Done for the 22 landed tokens (one `each_token_enables_only_its_own_adapter`
       case per token; the 2 severity tokens map to `demand.sessions`, since they derive from that
-      source's already-fetched fields rather than running an adapter of their own).
-- [ ] 6.3 Resolve each token in `src/ui/sidebar/tokens.rs` through the accessor. Render is a pure
-      read; no adapter runs on the render path. Done for the 14 landed tokens.
+      source's already-fetched fields rather than running an adapter of their own; the 8
+      transcript tokens map to `terminal_transcript_demand`, verified by
+      `each_transcript_token_enables_demand` in `terminal_transcript_refresh.rs`).
+- [x] 6.3 Resolve each token in `src/ui/sidebar/tokens.rs` through the accessor. Render is a pure
+      read; no adapter runs on the render path. Done for the 22 landed tokens.
 - [x] 6.4 Add config tests: each name parses, round-trips, and an unknown name is a configuration
       error rather than a silent elision. `session_provider_tokens_parse_and_round_trip` in
       `src/config/sidebar.rs`; the existing `spend_token_parses_round_trips_and_is_rejected_when_misspelled`

@@ -23,6 +23,9 @@ pub struct PaneDetail {
     pub last_agent_state_change_seq: Option<u64>,
     pub state_labels: HashMap<String, String>,
     pub tokens: HashMap<String, String>,
+    /// This pane's own Claude Code transcript usage — per-pane, not per-checkout, unlike every
+    /// other session-provider fact (see `TerminalState::cached_transcript_status`).
+    pub transcript_status: Option<crate::workspace::TranscriptUsage>,
 }
 
 impl Tab {
@@ -66,6 +69,7 @@ impl Tab {
                     last_agent_state_change_seq: terminal.last_agent_state_change_seq,
                     state_labels: presentation.state_labels,
                     tokens: terminal.metadata_tokens.values(),
+                    transcript_status: terminal.cached_transcript_status.clone(),
                 })
             })
             .collect()

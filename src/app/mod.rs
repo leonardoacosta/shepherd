@@ -26,6 +26,7 @@ mod session_provider_refresh;
 pub mod state;
 mod terminal_targets;
 mod terminal_titles;
+mod terminal_transcript_refresh;
 mod theme_sync;
 mod worktrees;
 
@@ -127,6 +128,8 @@ pub struct App {
     pub(crate) project_status_refresh_in_flight: bool,
     pub(crate) last_session_status_refresh: Instant,
     pub(crate) session_status_refresh_in_flight: bool,
+    pub(crate) last_terminal_transcript_refresh: Instant,
+    pub(crate) terminal_transcript_refresh_in_flight: bool,
     pub(crate) pending_api_worktree_creates: HashMap<std::path::PathBuf, u64>,
     pub(crate) pending_api_worktree_removes: HashMap<String, u64>,
     pub(crate) pending_api_worktree_remove_paths: HashMap<std::path::PathBuf, u64>,
@@ -770,6 +773,8 @@ impl App {
             project_status_refresh_in_flight: false,
             last_session_status_refresh: Instant::now() - SESSION_STATUS_REFRESH_INTERVAL,
             session_status_refresh_in_flight: false,
+            last_terminal_transcript_refresh: Instant::now() - SESSION_STATUS_REFRESH_INTERVAL,
+            terminal_transcript_refresh_in_flight: false,
             pending_api_worktree_creates: HashMap::new(),
             pending_api_worktree_removes: HashMap::new(),
             pending_api_worktree_remove_paths: HashMap::new(),
