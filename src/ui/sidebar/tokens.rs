@@ -87,6 +87,84 @@ pub(in crate::ui) fn agent_rows_from(
                             .and_then(|llmtrim| llmtrim.spend)
                             .map(crate::workspace::render_spend_status)
                             .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::Savings => entry
+                            .session_status
+                            .llmtrim
+                            .and_then(|llmtrim| llmtrim.savings)
+                            .map(crate::workspace::render_spend_status)
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::CacheReadTokens => entry
+                            .session_status
+                            .llmtrim
+                            .and_then(|llmtrim| llmtrim.cache_read_tokens)
+                            .map(|tokens| tokens.to_string())
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::InstructionTotalBytes => entry
+                            .session_status
+                            .context_floor
+                            .and_then(|cf| cf.instruction_total_bytes)
+                            .map(|bytes| bytes.to_string())
+                            .map(ResolvedTokenKind::Custom),
+                        // A boolean badge: present only when the warning is actually active, so
+                        // configuring this token adds a row that appears exactly when it matters
+                        // rather than a permanent "true"/"false" column.
+                        AgentSidebarToken::InstructionFloorWarn => entry
+                            .session_status
+                            .context_floor
+                            .and_then(|cf| cf.instruction_floor_warn)
+                            .filter(|warn| *warn)
+                            .map(|_| ResolvedTokenKind::Custom("!".to_string())),
+                        AgentSidebarToken::InstructionGrowthPct => entry
+                            .session_status
+                            .context_floor
+                            .and_then(|cf| cf.instruction_growth_bps)
+                            .map(crate::workspace::render_growth_bps)
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::InstructionDollarsPer1kTurns => entry
+                            .session_status
+                            .context_floor
+                            .and_then(|cf| cf.instruction_dollars_per_1k_turns_cents)
+                            .map(crate::workspace::render_signed_cents)
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::Model => entry
+                            .session_status
+                            .sessions
+                            .clone()
+                            .and_then(|s| s.model)
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::ContextTokens => entry
+                            .session_status
+                            .sessions
+                            .clone()
+                            .and_then(|s| s.context_tokens)
+                            .map(|tokens| tokens.to_string())
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::ContextWindowTokens => entry
+                            .session_status
+                            .sessions
+                            .clone()
+                            .and_then(|s| s.context_window_tokens)
+                            .map(|tokens| tokens.to_string())
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::SessionCount => entry
+                            .session_status
+                            .sessions
+                            .clone()
+                            .map(|s| s.session_count.to_string())
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::QuotaRemaining => entry
+                            .session_status
+                            .local_account_signal
+                            .clone()
+                            .and_then(|a| a.quota_remaining)
+                            .map(|remaining| remaining.to_string())
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::ResetAt => entry
+                            .session_status
+                            .local_account_signal
+                            .clone()
+                            .and_then(|a| a.reset_at)
+                            .map(ResolvedTokenKind::Custom),
                         AgentSidebarToken::Custom(name) => entry
                             .tokens
                             .get(name)
@@ -249,6 +327,166 @@ mod tests {
             rows: vec![vec![AgentSidebarToken::Spend]],
             ..Default::default()
         };
+        assert!(
+            agent_rows(&config, &entry(), "working").is_empty(),
+            "a fully unresolved row takes no space"
+        );
+    }
+
+    #[test]
+    fn llmtrims_other_tokens_render_and_elide_independently_of_spend() {
+        let config = AgentsSidebarConfig {
+            rows: vec![vec![
+                AgentSidebarToken::Savings,
+                AgentSidebarToken::CacheReadTokens,
+            ]],
+            ..Default::default()
+        };
+
+        let mut resolved = entry();
+        resolved.session_status = crate::workspace::SessionStatusSnapshot {
+            llmtrim: Some(crate::workspace::LlmTrimStatus {
+                savings: Some(crate::workspace::SpendStatus { cents: 250 }),
+                cache_read_tokens: Some(3_660_890_700),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            agent_rows(&config, &resolved, "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("$2.50".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("3660890700".into())),
+            ]]
+        );
+
+        assert!(
+            agent_rows(&config, &entry(), "working").is_empty(),
+            "a fully unresolved row takes no space"
+        );
+    }
+
+    #[test]
+    fn context_floor_tokens_render_and_elide_independently() {
+        let config = AgentsSidebarConfig {
+            rows: vec![vec![
+                AgentSidebarToken::InstructionTotalBytes,
+                AgentSidebarToken::InstructionFloorWarn,
+                AgentSidebarToken::InstructionGrowthPct,
+                AgentSidebarToken::InstructionDollarsPer1kTurns,
+            ]],
+            ..Default::default()
+        };
+
+        let mut resolved = entry();
+        resolved.session_status = crate::workspace::SessionStatusSnapshot {
+            context_floor: Some(crate::workspace::ContextFloorStatus {
+                instruction_total_bytes: Some(79_659),
+                instruction_floor_warn: Some(true),
+                instruction_growth_bps: Some(1234),
+                instruction_dollars_per_1k_turns_cents: Some(996),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            agent_rows(&config, &resolved, "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("79659".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("!".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("+12.34%".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("$9.96".into())),
+            ]]
+        );
+
+        // floor_warn specifically: false must elide (a badge that never shows "false").
+        let mut not_warned = entry();
+        not_warned.session_status.context_floor = Some(crate::workspace::ContextFloorStatus {
+            instruction_floor_warn: Some(false),
+            ..Default::default()
+        });
+        assert!(
+            agent_rows(
+                &AgentsSidebarConfig {
+                    rows: vec![vec![AgentSidebarToken::InstructionFloorWarn]],
+                    ..Default::default()
+                },
+                &not_warned,
+                "working"
+            )
+            .is_empty(),
+            "instruction_floor_warn=false must elide, not render \"false\""
+        );
+
+        assert!(
+            agent_rows(&config, &entry(), "working").is_empty(),
+            "a fully unresolved row takes no space"
+        );
+    }
+
+    #[test]
+    fn sessions_tokens_render_and_elide_independently() {
+        let config = AgentsSidebarConfig {
+            rows: vec![vec![
+                AgentSidebarToken::Model,
+                AgentSidebarToken::ContextTokens,
+                AgentSidebarToken::ContextWindowTokens,
+                AgentSidebarToken::SessionCount,
+            ]],
+            ..Default::default()
+        };
+
+        let mut resolved = entry();
+        resolved.session_status = crate::workspace::SessionStatusSnapshot {
+            sessions: Some(crate::workspace::SessionsStatus {
+                model: Some("claude-opus-5".to_string()),
+                context_tokens: Some(58_000),
+                context_window_tokens: Some(200_000),
+                session_count: 4,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            agent_rows(&config, &resolved, "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("claude-opus-5".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("58000".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("200000".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("4".into())),
+            ]]
+        );
+
+        assert!(
+            agent_rows(&config, &entry(), "working").is_empty(),
+            "a fully unresolved row takes no space"
+        );
+    }
+
+    #[test]
+    fn local_account_signal_tokens_render_and_elide_independently() {
+        let config = AgentsSidebarConfig {
+            rows: vec![vec![
+                AgentSidebarToken::QuotaRemaining,
+                AgentSidebarToken::ResetAt,
+            ]],
+            ..Default::default()
+        };
+
+        let mut resolved = entry();
+        resolved.session_status = crate::workspace::SessionStatusSnapshot {
+            local_account_signal: Some(crate::workspace::LocalAccountStatus {
+                quota_remaining: Some(120),
+                reset_at: Some("2026-08-05T14:00:00Z".to_string()),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            agent_rows(&config, &resolved, "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("120".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("2026-08-05T14:00:00Z".into())),
+            ]]
+        );
+
         assert!(
             agent_rows(&config, &entry(), "working").is_empty(),
             "a fully unresolved row takes no space"

@@ -85,8 +85,23 @@ impl App {
             .chain(self.state.topbar_rows.iter())
             .chain(self.state.right_panel_rows.iter());
         for token in agent_rows.flatten() {
-            if matches!(token.parts().0, crate::config::AgentSidebarToken::Spend) {
-                demand.llmtrim = true;
+            use crate::config::AgentSidebarToken;
+            match token.parts().0 {
+                AgentSidebarToken::Spend
+                | AgentSidebarToken::Savings
+                | AgentSidebarToken::CacheReadTokens => demand.llmtrim = true,
+                AgentSidebarToken::InstructionTotalBytes
+                | AgentSidebarToken::InstructionFloorWarn
+                | AgentSidebarToken::InstructionGrowthPct
+                | AgentSidebarToken::InstructionDollarsPer1kTurns => demand.context_floor = true,
+                AgentSidebarToken::Model
+                | AgentSidebarToken::ContextTokens
+                | AgentSidebarToken::ContextWindowTokens
+                | AgentSidebarToken::SessionCount => demand.sessions = true,
+                AgentSidebarToken::QuotaRemaining | AgentSidebarToken::ResetAt => {
+                    demand.local_account_signal = true;
+                }
+                _ => {}
             }
         }
         demand
@@ -478,6 +493,90 @@ mod tests {
                 AgentSidebarToken::Spend,
                 SessionStatusRefreshDemand {
                     llmtrim: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                AgentSidebarToken::Savings,
+                SessionStatusRefreshDemand {
+                    llmtrim: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                AgentSidebarToken::CacheReadTokens,
+                SessionStatusRefreshDemand {
+                    llmtrim: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                AgentSidebarToken::InstructionTotalBytes,
+                SessionStatusRefreshDemand {
+                    context_floor: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                AgentSidebarToken::InstructionFloorWarn,
+                SessionStatusRefreshDemand {
+                    context_floor: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                AgentSidebarToken::InstructionGrowthPct,
+                SessionStatusRefreshDemand {
+                    context_floor: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                AgentSidebarToken::InstructionDollarsPer1kTurns,
+                SessionStatusRefreshDemand {
+                    context_floor: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                AgentSidebarToken::Model,
+                SessionStatusRefreshDemand {
+                    sessions: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                AgentSidebarToken::ContextTokens,
+                SessionStatusRefreshDemand {
+                    sessions: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                AgentSidebarToken::ContextWindowTokens,
+                SessionStatusRefreshDemand {
+                    sessions: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                AgentSidebarToken::SessionCount,
+                SessionStatusRefreshDemand {
+                    sessions: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                AgentSidebarToken::QuotaRemaining,
+                SessionStatusRefreshDemand {
+                    local_account_signal: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                AgentSidebarToken::ResetAt,
+                SessionStatusRefreshDemand {
+                    local_account_signal: true,
                     ..Default::default()
                 },
             ),

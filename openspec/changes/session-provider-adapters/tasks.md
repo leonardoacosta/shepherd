@@ -99,19 +99,43 @@ of scope for this proposal.
 
 ## 6. Expose the vocabulary
 
+Landed for the four chrome sources' 12 facts (`savings`, `cache_read_tokens`,
+`instruction_total_bytes`, `instruction_floor_warn`, `instruction_growth_pct`,
+`instruction_dollars_per_1k_turns`, `model`, `context_tokens`, `context_window_tokens`,
+`session_count`, `quota_remaining`, `reset_at`) — the ones the proposal's own "Chrome adapter
+inventory" table enumerates. **Not landed**: tokens for transcript usage (still blocked on the
+per-session refresh-loop restructuring noted at task 4.2) or for the pricing/severity pure
+derivations (`session_pricing.rs`/`session_severity.rs` exist and are tested but have no token
+name or render path yet — a render token for e.g. context-window occupancy would need a new
+`ResolvedTokenKind` capable of carrying `severity::Tier`'s pulsing base/pulse colors, which is
+new rendering-surface work beyond wiring an existing `Custom(String)` value). Follow-up scope,
+not silently dropped.
+
 - [ ] 6.1 Add the token names for every source and derivation to `AgentSidebarToken`, following
-      `spend`.
+      `spend`. Done for the four chrome sources' 12 facts; transcript and pricing/severity
+      deferred per the note above.
 - [ ] 6.2 Extend demand resolution so each token enables only its own adapter, and add a demand
-      test per token.
+      test per token. Done for the 12 landed tokens (one `each_token_enables_only_its_own_adapter`
+      case per token).
 - [ ] 6.3 Resolve each token in `src/ui/sidebar/tokens.rs` through the accessor. Render is a pure
-      read; no adapter runs on the render path.
-- [ ] 6.4 Add config tests: each name parses, round-trips, and an unknown name is a configuration
-      error rather than a silent elision.
-- [ ] 6.5 Add render tests asserting independent elision and omission of a fully unresolved row.
-- [ ] 6.6 Update `docs/next/website/src/data/config-reference.json` with every new token name.
+      read; no adapter runs on the render path. Done for the 12 landed tokens.
+- [x] 6.4 Add config tests: each name parses, round-trips, and an unknown name is a configuration
+      error rather than a silent elision. `session_provider_tokens_parse_and_round_trip` in
+      `src/config/sidebar.rs`; the existing `spend_token_parses_round_trips_and_is_rejected_when_misspelled`
+      already covers the unknown-name-is-an-error case for this vocabulary.
+- [x] 6.5 Add render tests asserting independent elision and omission of a fully unresolved row.
+      One test per source (`llmtrims_other_tokens_...`, `context_floor_tokens_...`,
+      `sessions_tokens_...`, `local_account_signal_tokens_...`) in `src/ui/sidebar/tokens.rs`.
+- [x] 6.6 Update `docs/next/website/src/data/config-reference.json` with every new token name.
       `scripts/test_config_reference_check` gates this and `session-provider-status` was caught by
-      it.
-- [ ] 6.7 Run `cargo nextest run` and paste the passing output.
+      it. Note: the reference's "values" arrays use the checker's own naive
+      lowercase-no-separator transform of the Rust variant name (e.g. `cachereadtokens`), not the
+      real snake_case TOML value (`cache_read_tokens`) — a pre-existing quirk of this checker
+      (every existing entry, e.g. `stateicon` for the real `state_icon`, has the same shape), not
+      something this change introduced.
+- [x] 6.7 Run `cargo nextest run` and paste the passing output. 3348 tests run: 3348 passed, 0
+      failed (2026-08-05). `just check` also passes in full, including the Windows clippy target
+      and `scripts.test_config_reference_check`.
 
 ## 7. Shrink the companion
 

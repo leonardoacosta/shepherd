@@ -47,9 +47,9 @@ pub use self::{
     },
     session_status::{
         merge_persisted_sessions, parse_context_floor_status, parse_llmtrim_status,
-        parse_persisted_session_record, render_spend_status, ContextFloorStatus, LlmTrimStatus,
-        PersistedSessionRecord, SessionStatusRefreshDemand, SessionStatusSnapshot, SessionsStatus,
-        WorkspaceSessionStatus,
+        parse_persisted_session_record, render_growth_bps, render_signed_cents,
+        render_spend_status, ContextFloorStatus, LlmTrimStatus, PersistedSessionRecord,
+        SessionStatusRefreshDemand, SessionStatusSnapshot, SessionsStatus, WorkspaceSessionStatus,
     },
     tab::{NewPane, Tab},
 };

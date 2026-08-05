@@ -289,6 +289,22 @@ pub fn render_spend_status(spend: SpendStatus) -> String {
     format!("${}.{:02}", spend.cents / 100, spend.cents % 100)
 }
 
+/// Renders signed whole cents (e.g. `instruction_dollars_per_1k_turns_cents`) the same
+/// compact way [`render_spend_status`] renders unsigned ones.
+pub fn render_signed_cents(cents: i64) -> String {
+    let sign = if cents < 0 { "-" } else { "" };
+    let abs = cents.unsigned_abs();
+    format!("{sign}${}.{:02}", abs / 100, abs % 100)
+}
+
+/// Renders growth basis points (hundredths of a percent) as a signed percentage, e.g. `1234`
+/// basis points -> `"+12.34%"`.
+pub fn render_growth_bps(bps: i64) -> String {
+    let sign = if bps < 0 { "-" } else { "+" };
+    let abs = bps.unsigned_abs();
+    format!("{sign}{}.{:02}%", abs / 100, abs % 100)
+}
+
 /// Parses an RFC 3339 timestamp into nanoseconds since the Unix epoch, UTC-normalized. Only
 /// ordering is needed here (which observation is newest), so this is deliberately not a general
 /// calendar library — no existing dependency covers RFC 3339 parsing, and pulling one in for a

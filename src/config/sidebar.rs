@@ -113,6 +113,33 @@ pub enum AgentSidebarToken {
     TerminalTitleStripped,
     /// Cumulative spend, resolved by Shepherd's own session-provider refresh.
     Spend,
+    /// Cumulative savings from prompt caching. `llmtrim` source.
+    Savings,
+    /// Cumulative cache-read tokens. `llmtrim` source.
+    CacheReadTokens,
+    /// Instruction-budget total bytes. `context-floor` source.
+    InstructionTotalBytes,
+    /// Instruction-budget floor warning — renders only when the warning is active.
+    /// `context-floor` source.
+    InstructionFloorWarn,
+    /// Instruction-budget growth percentage since the prior observation. `context-floor` source.
+    InstructionGrowthPct,
+    /// Instruction-budget dollars per 1,000 turns. `context-floor` source.
+    InstructionDollarsPer1kTurns,
+    /// The session's model name. `sessions` source.
+    Model,
+    /// The session's current context-window token count. `sessions` source.
+    ContextTokens,
+    /// The session's context-window size. `sessions` source.
+    ContextWindowTokens,
+    /// How many sessions are in the persisted session store. `sessions` source.
+    SessionCount,
+    /// Remaining quota across every account with fresh, complete usage data.
+    /// `local-account-signal` source.
+    QuotaRemaining,
+    /// The earliest cooldown reset time among accounts on cooldown. `local-account-signal`
+    /// source.
+    ResetAt,
     Custom(String),
     Styled {
         token: Box<AgentSidebarToken>,
@@ -246,6 +273,20 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
         AgentSidebarToken::TerminalTitle => "terminal_title".into(),
         AgentSidebarToken::TerminalTitleStripped => "terminal_title_stripped".into(),
         AgentSidebarToken::Spend => "spend".into(),
+        AgentSidebarToken::Savings => "savings".into(),
+        AgentSidebarToken::CacheReadTokens => "cache_read_tokens".into(),
+        AgentSidebarToken::InstructionTotalBytes => "instruction_total_bytes".into(),
+        AgentSidebarToken::InstructionFloorWarn => "instruction_floor_warn".into(),
+        AgentSidebarToken::InstructionGrowthPct => "instruction_growth_pct".into(),
+        AgentSidebarToken::InstructionDollarsPer1kTurns => {
+            "instruction_dollars_per_1k_turns".into()
+        }
+        AgentSidebarToken::Model => "model".into(),
+        AgentSidebarToken::ContextTokens => "context_tokens".into(),
+        AgentSidebarToken::ContextWindowTokens => "context_window_tokens".into(),
+        AgentSidebarToken::SessionCount => "session_count".into(),
+        AgentSidebarToken::QuotaRemaining => "quota_remaining".into(),
+        AgentSidebarToken::ResetAt => "reset_at".into(),
         AgentSidebarToken::Custom(name) => format!("${name}"),
         AgentSidebarToken::Styled { token, .. } => agent_token_name(token),
     }
@@ -303,6 +344,21 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
                 ("terminal_title", Self::TerminalTitle),
                 ("terminal_title_stripped", Self::TerminalTitleStripped),
                 ("spend", Self::Spend),
+                ("savings", Self::Savings),
+                ("cache_read_tokens", Self::CacheReadTokens),
+                ("instruction_total_bytes", Self::InstructionTotalBytes),
+                ("instruction_floor_warn", Self::InstructionFloorWarn),
+                ("instruction_growth_pct", Self::InstructionGrowthPct),
+                (
+                    "instruction_dollars_per_1k_turns",
+                    Self::InstructionDollarsPer1kTurns,
+                ),
+                ("model", Self::Model),
+                ("context_tokens", Self::ContextTokens),
+                ("context_window_tokens", Self::ContextWindowTokens),
+                ("session_count", Self::SessionCount),
+                ("quota_remaining", Self::QuotaRemaining),
+                ("reset_at", Self::ResetAt),
             ],
         )
         .map_err(serde::de::Error::custom)?;
@@ -520,6 +576,56 @@ rows = [["workspace", { token = "spend", dim = true }]]
             .is_err(),
             "an unknown bare token is a configuration error, not an elision"
         );
+    }
+
+    /// Every session-provider token added alongside `spend`: each name parses, round-trips
+    /// through `agent_token_name`, and is distinct from every other token's name.
+    #[test]
+    fn session_provider_tokens_parse_and_round_trip() {
+        let cases = [
+            ("savings", AgentSidebarToken::Savings),
+            ("cache_read_tokens", AgentSidebarToken::CacheReadTokens),
+            (
+                "instruction_total_bytes",
+                AgentSidebarToken::InstructionTotalBytes,
+            ),
+            (
+                "instruction_floor_warn",
+                AgentSidebarToken::InstructionFloorWarn,
+            ),
+            (
+                "instruction_growth_pct",
+                AgentSidebarToken::InstructionGrowthPct,
+            ),
+            (
+                "instruction_dollars_per_1k_turns",
+                AgentSidebarToken::InstructionDollarsPer1kTurns,
+            ),
+            ("model", AgentSidebarToken::Model),
+            ("context_tokens", AgentSidebarToken::ContextTokens),
+            (
+                "context_window_tokens",
+                AgentSidebarToken::ContextWindowTokens,
+            ),
+            ("session_count", AgentSidebarToken::SessionCount),
+            ("quota_remaining", AgentSidebarToken::QuotaRemaining),
+            ("reset_at", AgentSidebarToken::ResetAt),
+        ];
+
+        let mut seen_names = std::collections::HashSet::new();
+        for (name, token) in &cases {
+            assert!(seen_names.insert(*name), "duplicate token name {name:?}");
+            assert_eq!(agent_token_name(token), *name);
+
+            let toml_body = format!("[ui.topbar]\nenabled = true\nrows = [[{name:?}]]\n");
+            let config: crate::config::Config =
+                toml::from_str(&toml_body).unwrap_or_else(|e| panic!("{name} must parse: {e}"));
+            assert_eq!(
+                config.ui.topbar.rows,
+                vec![vec![token.clone()]],
+                "{name} must round-trip to its own variant"
+            );
+        }
     }
 
     #[test]
