@@ -6,10 +6,11 @@
 //! color pairs) and `_SES_HANDOFF_THRESHOLD` (the 0.63 ratio) — this file is the fleet's sole
 //! home for the context-severity ramp going forward.
 //!
-//! Not yet wired into any adapter or the render path — task 5 lands the derivation and its
-//! ported tests ahead of task 6's vocabulary wiring. `dead_code` is allowed at the module level
-//! until that wiring lands; remove this attribute in the same change that adds the first
-//! non-test caller.
+//! `classify_tier`/`classify_ratio`/`resolve_color`/`base_color`/`pulse_color` are not yet
+//! wired into a token — a colored, pulsing tier badge needs a `ResolvedTokenKind` variant that
+//! can carry `Tier`'s base/pulse colors, which is new rendering-surface work beyond wiring an
+//! existing `Custom(String)` value (see `openspec/changes/session-provider-adapters/tasks.md`
+//! section 6's note). `past_handoff`/`render_occupancy_pct` render as plain text and are wired.
 #![allow(dead_code)]
 
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -158,6 +159,16 @@ pub fn past_handoff(raw_tokens: i64, window_size: i64) -> bool {
     (raw_tokens as f64) / (window_size as f64) >= HANDOFF_THRESHOLD
 }
 
+/// Renders `raw_tokens`/`window_size` as a whole-percent occupancy string, e.g. `"62%"`.
+/// `None` when `window_size <= 0` — fail-open, the same convention [`past_handoff`] uses.
+pub fn render_occupancy_pct(raw_tokens: i64, window_size: i64) -> Option<String> {
+    if window_size <= 0 {
+        return None;
+    }
+    let pct = (raw_tokens as f64 / window_size as f64 * 100.0).round();
+    Some(format!("{}%", pct as i64))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,5 +281,18 @@ mod tests {
             resolve_color(tier, UNIX_EPOCH + Duration::from_secs(1)),
             base
         );
+    }
+
+    #[test]
+    fn render_occupancy_pct_rounds_to_a_whole_percent() {
+        assert_eq!(render_occupancy_pct(62, 100), Some("62%".to_string()));
+        assert_eq!(render_occupancy_pct(1, 3), Some("33%".to_string()));
+        assert_eq!(render_occupancy_pct(2, 3), Some("67%".to_string()));
+    }
+
+    #[test]
+    fn render_occupancy_pct_fails_open_on_a_non_positive_window() {
+        assert_eq!(render_occupancy_pct(100, 0), None);
+        assert_eq!(render_occupancy_pct(100, -1), None);
     }
 }

@@ -140,6 +140,13 @@ pub enum AgentSidebarToken {
     /// The earliest cooldown reset time among accounts on cooldown. `local-account-signal`
     /// source.
     ResetAt,
+    /// The session's context-window occupancy as a whole percent, e.g. `"62%"`. A pure
+    /// derivation over `sessions`' `context_tokens`/`context_window_tokens` — no adapter of its
+    /// own.
+    ContextOccupancyPct,
+    /// Renders only when the session's context occupancy has crossed the handoff threshold.
+    /// Same source and derivation as `context_occupancy_pct`.
+    ContextHandoffWarning,
     Custom(String),
     Styled {
         token: Box<AgentSidebarToken>,
@@ -287,6 +294,8 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
         AgentSidebarToken::SessionCount => "session_count".into(),
         AgentSidebarToken::QuotaRemaining => "quota_remaining".into(),
         AgentSidebarToken::ResetAt => "reset_at".into(),
+        AgentSidebarToken::ContextOccupancyPct => "context_occupancy_pct".into(),
+        AgentSidebarToken::ContextHandoffWarning => "context_handoff_warning".into(),
         AgentSidebarToken::Custom(name) => format!("${name}"),
         AgentSidebarToken::Styled { token, .. } => agent_token_name(token),
     }
@@ -359,6 +368,8 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
                 ("session_count", Self::SessionCount),
                 ("quota_remaining", Self::QuotaRemaining),
                 ("reset_at", Self::ResetAt),
+                ("context_occupancy_pct", Self::ContextOccupancyPct),
+                ("context_handoff_warning", Self::ContextHandoffWarning),
             ],
         )
         .map_err(serde::de::Error::custom)?;
@@ -610,6 +621,14 @@ rows = [["workspace", { token = "spend", dim = true }]]
             ("session_count", AgentSidebarToken::SessionCount),
             ("quota_remaining", AgentSidebarToken::QuotaRemaining),
             ("reset_at", AgentSidebarToken::ResetAt),
+            (
+                "context_occupancy_pct",
+                AgentSidebarToken::ContextOccupancyPct,
+            ),
+            (
+                "context_handoff_warning",
+                AgentSidebarToken::ContextHandoffWarning,
+            ),
         ];
 
         let mut seen_names = std::collections::HashSet::new();

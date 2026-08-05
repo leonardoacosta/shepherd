@@ -97,7 +97,9 @@ impl App {
                 AgentSidebarToken::Model
                 | AgentSidebarToken::ContextTokens
                 | AgentSidebarToken::ContextWindowTokens
-                | AgentSidebarToken::SessionCount => demand.sessions = true,
+                | AgentSidebarToken::SessionCount
+                | AgentSidebarToken::ContextOccupancyPct
+                | AgentSidebarToken::ContextHandoffWarning => demand.sessions = true,
                 AgentSidebarToken::QuotaRemaining | AgentSidebarToken::ResetAt => {
                     demand.local_account_signal = true;
                 }
@@ -577,6 +579,20 @@ mod tests {
                 AgentSidebarToken::ResetAt,
                 SessionStatusRefreshDemand {
                     local_account_signal: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                AgentSidebarToken::ContextOccupancyPct,
+                SessionStatusRefreshDemand {
+                    sessions: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                AgentSidebarToken::ContextHandoffWarning,
+                SessionStatusRefreshDemand {
+                    sessions: true,
                     ..Default::default()
                 },
             ),

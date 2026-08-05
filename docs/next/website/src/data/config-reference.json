@@ -713,6 +713,8 @@
             "sessioncount",
             "quotaremaining",
             "resetat",
+            "contextoccupancypct",
+            "contexthandoffwarning",
             "custom"
           ]
         },
@@ -755,6 +757,8 @@
             "sessioncount",
             "quotaremaining",
             "resetat",
+            "contextoccupancypct",
+            "contexthandoffwarning",
             "custom"
           ]
         },

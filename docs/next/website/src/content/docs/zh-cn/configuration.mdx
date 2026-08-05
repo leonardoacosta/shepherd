@@ -385,6 +385,8 @@ Agent 行支持以下内置 token：
 - `session_count` — 持久化会话存储中当前的会话数量。
 - `quota_remaining` — 所有本地跟踪账户中，具有新鲜且完整使用数据的账户的剩余配额总和。从 Shepherd 自身的凭据状态目录只读解析，与其他来源相互独立地省略。
 - `reset_at` — 处于冷却状态的本地跟踪账户中，最早的冷却重置时间。
+- `context_occupancy_pct` — 会话上下文窗口占用率，以整数百分比表示，例如 `62%`。这是对上面 `context_tokens`/`context_window_tokens` 的纯派生值——不读取自己的数据源，省略条件与这两者相同。
+- `context_handoff_warning` — 仅当会话的上下文占用率超过交接阈值时才会渲染；否则该 token 会像未解析的值一样被省略。
 - `$name` — 名为 `name` 的自定义窗格元数据。
 
 Space 行支持以下内置 token：

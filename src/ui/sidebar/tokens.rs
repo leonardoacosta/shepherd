@@ -165,6 +165,26 @@ pub(in crate::ui) fn agent_rows_from(
                             .clone()
                             .and_then(|a| a.reset_at)
                             .map(ResolvedTokenKind::Custom),
+                        // Pure derivations over `sessions`' own fields — no adapter of their
+                        // own, so they key off `entry.session_status.sessions` directly.
+                        AgentSidebarToken::ContextOccupancyPct => entry
+                            .session_status
+                            .sessions
+                            .clone()
+                            .and_then(|s| Some((s.context_tokens?, s.context_window_tokens?)))
+                            .and_then(|(tokens, window)| {
+                                crate::workspace::render_occupancy_pct(tokens, window)
+                            })
+                            .map(ResolvedTokenKind::Custom),
+                        AgentSidebarToken::ContextHandoffWarning => entry
+                            .session_status
+                            .sessions
+                            .clone()
+                            .and_then(|s| Some((s.context_tokens?, s.context_window_tokens?)))
+                            .filter(|(tokens, window)| {
+                                crate::workspace::past_handoff(*tokens, *window)
+                            })
+                            .map(|_| ResolvedTokenKind::Custom("!".to_string())),
                         AgentSidebarToken::Custom(name) => entry
                             .tokens
                             .get(name)
@@ -458,6 +478,53 @@ mod tests {
         assert!(
             agent_rows(&config, &entry(), "working").is_empty(),
             "a fully unresolved row takes no space"
+        );
+    }
+
+    #[test]
+    fn context_severity_tokens_are_pure_derivations_over_sessions_data() {
+        let config = AgentsSidebarConfig {
+            rows: vec![vec![
+                AgentSidebarToken::ContextOccupancyPct,
+                AgentSidebarToken::ContextHandoffWarning,
+            ]],
+            ..Default::default()
+        };
+
+        // Below the handoff threshold (0.63): occupancy renders, the warning elides.
+        let mut below = entry();
+        below.session_status.sessions = Some(crate::workspace::SessionsStatus {
+            context_tokens: Some(100_000),
+            context_window_tokens: Some(200_000),
+            ..Default::default()
+        });
+        assert_eq!(
+            agent_rows(&config, &below, "working"),
+            vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Custom(
+                "50%".into()
+            ))]],
+            "below the handoff threshold, only occupancy renders"
+        );
+
+        // At/above the handoff threshold: both render.
+        let mut past = entry();
+        past.session_status.sessions = Some(crate::workspace::SessionsStatus {
+            context_tokens: Some(140_000),
+            context_window_tokens: Some(200_000),
+            ..Default::default()
+        });
+        assert_eq!(
+            agent_rows(&config, &past, "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("70%".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("!".into())),
+            ]]
+        );
+
+        assert!(
+            agent_rows(&config, &entry(), "working").is_empty(),
+            "a fully unresolved row takes no space -- these are pure derivations, not a\
+             separate source, but still elide with no context_tokens/context_window_tokens"
         );
     }
 

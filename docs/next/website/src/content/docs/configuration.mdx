@@ -399,6 +399,8 @@ Agent rows accept these built-in tokens:
 - `session_count` — how many sessions are currently in the persisted session store.
 - `quota_remaining` — total remaining quota across every locally tracked account with fresh, complete usage data. Resolved read-only from Shepherd's own credential state directory; elides independently of every other source.
 - `reset_at` — the earliest cooldown reset time among locally tracked accounts on cooldown.
+- `context_occupancy_pct` — the session's context-window occupancy as a whole percent, e.g. `62%`. A pure derivation over `context_tokens`/`context_window_tokens` above — it reads no source of its own and elides under the same conditions those two do.
+- `context_handoff_warning` — renders only when the session's context occupancy has crossed the handoff threshold; otherwise the token elides, the same as an absent value.
 - `$name` — custom pane metadata named `name`.
 
 Space rows accept these built-in tokens:

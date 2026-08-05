@@ -103,29 +103,36 @@ Landed for the four chrome sources' 12 facts (`savings`, `cache_read_tokens`,
 `instruction_total_bytes`, `instruction_floor_warn`, `instruction_growth_pct`,
 `instruction_dollars_per_1k_turns`, `model`, `context_tokens`, `context_window_tokens`,
 `session_count`, `quota_remaining`, `reset_at`) — the ones the proposal's own "Chrome adapter
-inventory" table enumerates. **Not landed**: tokens for transcript usage (still blocked on the
-per-session refresh-loop restructuring noted at task 4.2) or for the pricing/severity pure
-derivations (`session_pricing.rs`/`session_severity.rs` exist and are tested but have no token
-name or render path yet — a render token for e.g. context-window occupancy would need a new
-`ResolvedTokenKind` capable of carrying `severity::Tier`'s pulsing base/pulse colors, which is
-new rendering-surface work beyond wiring an existing `Custom(String)` value). Follow-up scope,
-not silently dropped.
+inventory" table enumerates — plus 2 of severity's pure derivations that render as plain text
+over already-fetched `sessions` data (`context_occupancy_pct`, `context_handoff_warning`),
+landed in a follow-up pass once the design gap they'd been deferred for turned out to be
+narrower than first assessed (they don't need a colored/pulsing badge to be useful). **Still not
+landed**: tokens for transcript usage (blocked on the per-session refresh-loop restructuring
+noted at task 4.2 — a real architectural extension, not attempted this pass) and for pricing's
+cost derivation (needs transcript's token counts, so it inherits the same block). Severity's own
+remaining surface (`classify_tier`/`resolve_color`/pulsing base/pulse colors) still needs a new
+`ResolvedTokenKind` capable of carrying two colors, which stays deferred. Follow-up scope, not
+silently dropped.
 
 - [ ] 6.1 Add the token names for every source and derivation to `AgentSidebarToken`, following
-      `spend`. Done for the four chrome sources' 12 facts; transcript and pricing/severity
-      deferred per the note above.
+      `spend`. Done for the four chrome sources' 12 facts plus `context_occupancy_pct`/
+      `context_handoff_warning`; transcript and pricing/severity's colored-tier surface deferred
+      per the note above.
 - [ ] 6.2 Extend demand resolution so each token enables only its own adapter, and add a demand
-      test per token. Done for the 12 landed tokens (one `each_token_enables_only_its_own_adapter`
-      case per token).
+      test per token. Done for the 14 landed tokens (one `each_token_enables_only_its_own_adapter`
+      case per token; the 2 severity tokens map to `demand.sessions`, since they derive from that
+      source's already-fetched fields rather than running an adapter of their own).
 - [ ] 6.3 Resolve each token in `src/ui/sidebar/tokens.rs` through the accessor. Render is a pure
-      read; no adapter runs on the render path. Done for the 12 landed tokens.
+      read; no adapter runs on the render path. Done for the 14 landed tokens.
 - [x] 6.4 Add config tests: each name parses, round-trips, and an unknown name is a configuration
       error rather than a silent elision. `session_provider_tokens_parse_and_round_trip` in
       `src/config/sidebar.rs`; the existing `spend_token_parses_round_trips_and_is_rejected_when_misspelled`
       already covers the unknown-name-is-an-error case for this vocabulary.
 - [x] 6.5 Add render tests asserting independent elision and omission of a fully unresolved row.
       One test per source (`llmtrims_other_tokens_...`, `context_floor_tokens_...`,
-      `sessions_tokens_...`, `local_account_signal_tokens_...`) in `src/ui/sidebar/tokens.rs`.
+      `sessions_tokens_...`, `local_account_signal_tokens_...`) plus one for the two derived
+      tokens (`context_severity_tokens_are_pure_derivations_over_sessions_data`) in
+      `src/ui/sidebar/tokens.rs`.
 - [x] 6.6 Update `docs/next/website/src/data/config-reference.json` with every new token name.
       `scripts/test_config_reference_check` gates this and `session-provider-status` was caught by
       it. Note: the reference's "values" arrays use the checker's own naive
@@ -133,9 +140,10 @@ not silently dropped.
       real snake_case TOML value (`cache_read_tokens`) — a pre-existing quirk of this checker
       (every existing entry, e.g. `stateicon` for the real `state_icon`, has the same shape), not
       something this change introduced.
-- [x] 6.7 Run `cargo nextest run` and paste the passing output. 3348 tests run: 3348 passed, 0
-      failed (2026-08-05). `just check` also passes in full, including the Windows clippy target
-      and `scripts.test_config_reference_check`.
+- [x] 6.7 Run `cargo nextest run` and paste the passing output. 3351 tests run: 3351 passed, 0
+      failed (2026-08-05, after landing `context_occupancy_pct`/`context_handoff_warning`).
+      `just check` also passes in full, including the Windows clippy target and
+      `scripts.test_config_reference_check`.
 
 ## 7. Shrink the companion
 

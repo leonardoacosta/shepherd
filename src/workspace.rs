@@ -45,6 +45,7 @@ pub use self::{
         render_proposal_counts, BeadCounts, ProjectStatusRefreshDemand, ProjectStatusSnapshot,
         ProposalCounts, WorkspaceProjectStatus,
     },
+    session_severity::{past_handoff, render_occupancy_pct},
     session_status::{
         merge_persisted_sessions, parse_context_floor_status, parse_llmtrim_status,
         parse_persisted_session_record, render_growth_bps, render_signed_cents,
