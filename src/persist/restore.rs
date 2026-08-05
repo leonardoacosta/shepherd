@@ -417,6 +417,8 @@ fn restore_workspace(
             cached_git_branch: crate::workspace::git_branch(&snap.identity_cwd),
             cached_git_ahead_behind: None,
             cached_git_space,
+            cached_project_status: crate::workspace::ProjectStatusSnapshot::default(),
+            cached_project_status_key: None,
             worktree_space,
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
             metadata_token_sequences: HashMap::new(),

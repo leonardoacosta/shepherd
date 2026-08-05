@@ -220,6 +220,7 @@ fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indent
             ahead_behind: ws.git_ahead_behind(),
             tokens: &token_values,
             suppress_git_details: indented,
+            project_status: ws.project_status(),
         },
     )
     .len()
@@ -1396,6 +1397,7 @@ fn render_workspace_list(
                 ahead_behind: ws.git_ahead_behind(),
                 tokens: &token_values,
                 suppress_git_details: card.indented,
+                project_status: ws.project_status(),
             },
         );
 

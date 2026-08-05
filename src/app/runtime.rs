@@ -297,6 +297,7 @@ impl App {
         changed |= self.clear_due_selection_highlight(now);
 
         self.start_git_status_refresh_if_due(now);
+        self.start_project_status_refresh_if_due(now);
 
         if self
             .next_auto_update_check
@@ -537,6 +538,11 @@ impl App {
             self.copy_feedback_deadline,
             include_git_refresh
                 .then(|| self.git_refresh_deadline())
+                .flatten(),
+            // Reported separately from the Git deadline: project status runs on its own,
+            // slower interval and must not be pulled forward by a Git tick.
+            include_git_refresh
+                .then(|| self.project_status_refresh_deadline())
                 .flatten(),
             self.next_auto_update_check,
             self.next_agent_manifest_update_check,

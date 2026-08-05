@@ -782,7 +782,7 @@
           "key": "ui.sidebar.spaces.rows",
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"workspace\"], [\"branch\", \"git_status\"]]",
-          "description": "Expanded Space sidebar layout. Entries may be token strings or inline { token, fg, bold, dim } style tables. Supports built-in and $name metadata tokens; at most 16 rows and 16 tokens per row."
+          "description": "Expanded Space sidebar layout. Entries may be token strings or inline { token, fg, bold, dim } style tables. Supports built-in and $name metadata tokens; at most 16 rows and 16 tokens per row. The proposals and beads tokens report the space's checkout work queue (op: 2o 1ip, bd: 3o 1r 0b), refreshed natively on their own slower timer only when a configured row uses them, and elided individually when the openspec or bd provider is unavailable."
         },
         {
           "key": "ui.accent",

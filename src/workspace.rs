@@ -16,6 +16,7 @@ use crate::terminal::{TerminalId, TerminalRuntime, TerminalRuntimeRegistry, Term
 
 mod aggregate;
 mod git;
+mod project_status;
 mod tab;
 
 #[cfg(test)]
@@ -26,6 +27,11 @@ pub use self::{
     git::{
         derive_label_from_cwd, fallback_label_from_cwd, git_branch, git_space_metadata,
         git_status_cache_key, GitSpaceMetadata, GitStatusCacheEntry, GitStatusRefreshDemand,
+    },
+    project_status::{
+        parse_bead_open_and_blocked, parse_bead_ready, parse_proposal_counts, render_bead_counts,
+        render_proposal_counts, BeadCounts, ProjectStatusRefreshDemand, ProjectStatusSnapshot,
+        ProposalCounts, WorkspaceProjectStatus,
     },
     tab::{NewPane, Tab},
 };
@@ -186,6 +192,12 @@ pub struct Workspace {
     pub(crate) cached_git_ahead_behind: Option<(usize, usize)>,
     /// Cached derived Git repo metadata for worktree actions and status display.
     pub(crate) cached_git_space: Option<GitSpaceMetadata>,
+    /// Cached per-checkout work-queue counts, keyed by `cached_project_status_key`.
+    pub(crate) cached_project_status: ProjectStatusSnapshot,
+    /// Checkout this workspace's cached project status was derived from. Distinct from
+    /// `cached_git_status_key` (the repo): linked worktrees hold separate `openspec/changes/`
+    /// and issue-database contents, so they must not share an entry.
+    pub(crate) cached_project_status_key: Option<PathBuf>,
     /// Explicit Shepherd-managed worktree grouping provenance.
     pub worktree_space: Option<WorktreeSpaceMembership>,
     pub(crate) metadata_tokens: crate::metadata_tokens::MetadataTokens,
@@ -253,6 +265,8 @@ impl Workspace {
             cached_git_branch: git_branch(&identity_cwd),
             cached_git_ahead_behind: None,
             cached_git_space,
+            cached_project_status: ProjectStatusSnapshot::default(),
+            cached_project_status_key: None,
             worktree_space: None,
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
             metadata_token_sequences: HashMap::new(),
@@ -441,6 +455,8 @@ impl Workspace {
                 cached_git_branch: git_branch(&initial_cwd),
                 cached_git_ahead_behind: None,
                 cached_git_space,
+                cached_project_status: ProjectStatusSnapshot::default(),
+                cached_project_status_key: None,
                 worktree_space: None,
                 metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
                 metadata_token_sequences: HashMap::new(),
@@ -1150,6 +1166,23 @@ impl Workspace {
         self.cached_git_ahead_behind
     }
 
+    pub fn project_status(&self) -> ProjectStatusSnapshot {
+        self.cached_project_status
+    }
+
+    /// The checkout this workspace's project status is keyed by. `None` until Git discovery
+    /// has resolved a checkout, which is also the state in which no refresh can run.
+    pub(crate) fn project_status_key(&self) -> Option<PathBuf> {
+        self.cached_git_space
+            .as_ref()
+            .map(|space| PathBuf::from(&space.checkout_key))
+    }
+
+    pub(crate) fn apply_project_status(&mut self, key: PathBuf, snapshot: ProjectStatusSnapshot) {
+        self.cached_project_status_key = Some(key);
+        self.cached_project_status = snapshot;
+    }
+
     pub fn git_space(&self) -> Option<&GitSpaceMetadata> {
         self.cached_git_space.as_ref()
     }
@@ -1276,6 +1309,8 @@ impl Workspace {
             cached_git_branch: git_branch(&identity_cwd),
             cached_git_ahead_behind: None,
             cached_git_space: None,
+            cached_project_status: ProjectStatusSnapshot::default(),
+            cached_project_status_key: None,
             worktree_space: None,
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
             metadata_token_sequences: HashMap::new(),

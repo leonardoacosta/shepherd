@@ -143,6 +143,10 @@ pub enum AppEvent {
         results: Vec<WorkspaceGitStatus>,
         cache_updates: Vec<(std::path::PathBuf, GitStatusCacheEntry)>,
     },
+    /// Background per-checkout project status refresh completed for workspaces.
+    ProjectStatusRefreshed {
+        results: Vec<crate::workspace::WorkspaceProjectStatus>,
+    },
     /// A plugin action or event command finished.
     PluginCommandFinished {
         log_id: String,

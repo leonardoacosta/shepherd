@@ -65,6 +65,9 @@ impl App {
                 results,
                 cache_updates,
             } => self.handle_git_status_refreshed(results, cache_updates),
+            AppEvent::ProjectStatusRefreshed { results } => {
+                self.handle_project_status_refreshed(results)
+            }
             ev => {
                 self.handle_internal_event(ev);
                 true
@@ -90,6 +93,24 @@ impl App {
         let changed = self
             .state
             .apply_workspace_git_statuses(&self.terminal_runtimes, results);
+        if changed {
+            self.render_dirty.store(true, Ordering::Release);
+            self.render_notify.notify_one();
+        }
+        changed
+    }
+
+    fn handle_project_status_refreshed(
+        &mut self,
+        results: Vec<crate::workspace::WorkspaceProjectStatus>,
+    ) -> bool {
+        let changed = results.iter().any(|result| {
+            self.state
+                .workspaces
+                .iter()
+                .any(|ws| ws.id == result.workspace_id && ws.project_status() != result.snapshot)
+        });
+        self.apply_project_status_results(results);
         if changed {
             self.render_dirty.store(true, Ordering::Release);
             self.render_notify.notify_one();
@@ -129,6 +150,11 @@ impl App {
         } = ev
         {
             self.handle_git_status_refreshed(results, cache_updates);
+            return;
+        }
+
+        if let AppEvent::ProjectStatusRefreshed { results } = ev {
+            self.handle_project_status_refreshed(results);
             return;
         }
 

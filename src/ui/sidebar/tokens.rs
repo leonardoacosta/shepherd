@@ -101,6 +101,9 @@ pub(super) struct SpaceTokenContext<'a> {
     pub ahead_behind: Option<(usize, usize)>,
     pub tokens: &'a std::collections::HashMap<String, String>,
     pub suppress_git_details: bool,
+    /// Per-checkout work-queue counts. Each half is independently absent, so one
+    /// unavailable provider elides only its own token.
+    pub project_status: crate::workspace::ProjectStatusSnapshot,
 }
 
 pub(super) fn space_rows(
@@ -132,6 +135,18 @@ pub(super) fn space_rows(
                             .filter(|(ahead, behind)| *ahead > 0 || *behind > 0)
                             .map(|(ahead, behind)| ResolvedTokenKind::GitStatus { ahead, behind }),
                         SpaceSidebarToken::GitStatus => None,
+                        // Rendered as Custom so the counts inherit the existing styling,
+                        // separator, and elision rules instead of gaining their own path.
+                        SpaceSidebarToken::Proposals => context
+                            .project_status
+                            .proposals
+                            .map(crate::workspace::render_proposal_counts)
+                            .map(ResolvedTokenKind::Custom),
+                        SpaceSidebarToken::Beads => context
+                            .project_status
+                            .beads
+                            .map(crate::workspace::render_bead_counts)
+                            .map(ResolvedTokenKind::Custom),
                         SpaceSidebarToken::Custom(name) => context
                             .tokens
                             .get(name)
@@ -306,6 +321,7 @@ mod tests {
                     ahead_behind: Some((2, 1)),
                     tokens: &std::collections::HashMap::new(),
                     suppress_git_details: true,
+                    project_status: Default::default(),
                 },
             ),
             vec![vec![
@@ -333,12 +349,126 @@ mod tests {
                     ahead_behind: None,
                     tokens: &tokens,
                     suppress_git_details: false,
+                    project_status: Default::default(),
                 },
             ),
             vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Custom(
                 "2 changes".into()
             ))]]
         );
+    }
+
+    fn project_status(
+        proposals: Option<(usize, usize)>,
+        beads: Option<(usize, usize, usize)>,
+    ) -> crate::workspace::ProjectStatusSnapshot {
+        crate::workspace::ProjectStatusSnapshot {
+            proposals: proposals
+                .map(|(open, in_progress)| crate::workspace::ProposalCounts { open, in_progress }),
+            beads: beads.map(|(open, ready, blocked)| crate::workspace::BeadCounts {
+                open,
+                ready,
+                blocked,
+            }),
+        }
+    }
+
+    fn project_status_rows(
+        snapshot: crate::workspace::ProjectStatusSnapshot,
+        rows: Vec<Vec<SpaceSidebarToken>>,
+    ) -> Vec<Vec<ResolvedToken>> {
+        space_rows(
+            &SpacesSidebarConfig {
+                rows,
+                ..Default::default()
+            },
+            SpaceTokenContext {
+                workspace: "repo",
+                branch: Some("dev"),
+                state_text: "idle",
+                ahead_behind: Some((2, 0)),
+                tokens: &std::collections::HashMap::new(),
+                suppress_git_details: false,
+                project_status: snapshot,
+            },
+        )
+    }
+
+    #[test]
+    fn both_project_tokens_resolve_when_both_halves_are_present() {
+        let resolved = project_status_rows(
+            project_status(Some((2, 1)), Some((3, 1, 0))),
+            vec![vec![SpaceSidebarToken::Proposals, SpaceSidebarToken::Beads]],
+        );
+
+        assert_eq!(
+            resolved,
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("op: 2o 1ip".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("bd: 3o 1r 0b".into())),
+            ]]
+        );
+    }
+
+    #[test]
+    fn an_absent_half_elides_only_its_own_token() {
+        let resolved = project_status_rows(
+            project_status(Some((2, 1)), None),
+            vec![vec![
+                SpaceSidebarToken::Proposals,
+                SpaceSidebarToken::Beads,
+                SpaceSidebarToken::GitStatus,
+            ]],
+        );
+
+        assert_eq!(
+            resolved,
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("op: 2o 1ip".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::GitStatus {
+                    ahead: 2,
+                    behind: 0
+                }),
+            ]],
+            "the missing beads token drops out; git tokens are untouched"
+        );
+    }
+
+    #[test]
+    fn a_row_of_only_absent_project_tokens_is_omitted() {
+        let resolved = project_status_rows(
+            project_status(None, None),
+            vec![
+                vec![SpaceSidebarToken::Workspace],
+                vec![SpaceSidebarToken::Proposals, SpaceSidebarToken::Beads],
+            ],
+        );
+
+        assert_eq!(
+            resolved,
+            vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Workspace(
+                "repo".into()
+            ))]],
+            "a fully unresolved row takes no space"
+        );
+    }
+
+    #[test]
+    fn project_tokens_carry_configured_inline_styles() {
+        let style = SidebarTokenStyle {
+            bold: Some(true),
+            ..Default::default()
+        };
+        let resolved = project_status_rows(
+            project_status(Some((1, 0)), None),
+            vec![vec![SpaceSidebarToken::Styled {
+                token: Box::new(SpaceSidebarToken::Proposals),
+                style,
+            }]],
+        );
+
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0][0].style.bold, Some(true));
     }
 }
 
@@ -703,6 +833,7 @@ mod presentation_layout_candidate {
                         ahead_behind: case.ahead_behind,
                         tokens: &empty_tokens,
                         suppress_git_details: false,
+                        project_status: Default::default(),
                     },
                 );
                 for width in widths {
@@ -745,6 +876,7 @@ mod presentation_layout_candidate {
                 ahead_behind: Some((0, 0)),
                 tokens: &empty_tokens,
                 suppress_git_details: false,
+                project_status: Default::default(),
             },
         );
         assert_eq!(
@@ -767,6 +899,7 @@ mod presentation_layout_candidate {
                 ahead_behind: Some((2, 1)),
                 tokens: &empty_tokens,
                 suppress_git_details: false,
+                project_status: Default::default(),
             },
         );
         assert_eq!(

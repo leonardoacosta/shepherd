@@ -369,7 +369,13 @@ Space 行支持以下内置 token：
 - `workspace` — 工作区名称。
 - `branch` — Git 分支（如有）。
 - `git_status` — 非零时显示 Git ahead 和 behind 数量。
+- `proposals` — 该空间检出目录中未归档和进行中的变更提案数量，格式为 `op: 2o 1ip`。
+- `beads` — 该空间检出目录中 open、ready 和 blocked 的跟踪问题数量，格式为 `bd: 3o 1r 0b`。
 - `$name` — 名为 `name` 的自定义工作区元数据。
+
+`proposals` 和 `beads` 由 Shepherd 使用自己的刷新计时器计算，频率低于 Git 状态，并且只在已配置的行确实用到这些 token 时才会执行——未配置的 token 不会启动任何进程。它们读取该空间解析到的检出目录，因此关联工作树报告自己的数量而不是父仓库的，并且指向同一检出目录的多个空间共享一次刷新。
+
+它们依赖 `PATH` 中存在 `openspec` 和 `bd`，但两者都不是必需的。当某个提供方缺失、失败、超时或返回非预期内容时，只有它自己的 token 没有值，并且会像任何其他缺失 token 一样被省略。另一个 token 和所有 Git token 都不受影响。
 
 token 会按配置顺序渲染。Shepherd 通常使用 ` · ` 分隔相邻值，并在 `state_icon` 后使用一个空格。缺失值及其分隔符会消失；当一行中的所有 token 都没有值时，该行会消失。每个布局最多可包含 16 行，每行最多可包含 16 个 token。
 
