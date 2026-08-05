@@ -2,6 +2,15 @@
 
 Terminal based agent runtime for coding agents.
 
+## Shared Vocabulary
+
+Read [`CONTEXT.md`](CONTEXT.md) before implementing or specifying anything that computes, caches,
+or displays a fact. It names the seven layers a displayed fact passes through, and lists the loose
+words that map onto them. When a request uses one of its **trigger words** — "business layer",
+"global state", "external provider", "native", "absorb the responsibilities", "mimic the sidebar",
+"topbar", "the border" — stop and confirm which layer is meant before writing code or authoring a
+proposal.
+
 ## Scope and Audience
 
 These instructions are layered.
