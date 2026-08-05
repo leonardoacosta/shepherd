@@ -79,6 +79,13 @@ pub(in crate::ui) fn agent_rows_from(
                             .terminal_title_stripped
                             .clone()
                             .map(ResolvedTokenKind::TerminalTitle),
+                        // Rendered as Custom so the value inherits the existing styling,
+                        // separator, and elision rules instead of gaining its own path.
+                        AgentSidebarToken::Spend => entry
+                            .session_status
+                            .spend
+                            .map(crate::workspace::render_spend_status)
+                            .map(ResolvedTokenKind::Custom),
                         AgentSidebarToken::Custom(name) => entry
                             .tokens
                             .get(name)
@@ -196,7 +203,51 @@ mod tests {
             last_agent_state_change_seq: None,
             state_labels: std::collections::HashMap::new(),
             tokens: std::collections::HashMap::new(),
+            session_status: Default::default(),
         }
+    }
+
+    #[test]
+    fn spend_resolves_from_the_store_and_elides_when_absent() {
+        let config = AgentsSidebarConfig {
+            rows: vec![vec![AgentSidebarToken::Workspace, AgentSidebarToken::Spend]],
+            ..Default::default()
+        };
+
+        let mut resolved = entry();
+        resolved.session_status = crate::workspace::SessionStatusSnapshot {
+            spend: Some(crate::workspace::SpendStatus { cents: 1_021_070 }),
+        };
+        assert_eq!(
+            agent_rows(&config, &resolved, "working"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::Workspace("repo".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Custom("$10210.70".into())),
+            ]],
+            "a resolved value renders beside its row-mates"
+        );
+
+        // Absent is the degraded state for every adapter failure class.
+        let absent = entry();
+        assert_eq!(
+            agent_rows(&config, &absent, "working"),
+            vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Workspace(
+                "repo".into()
+            ))]],
+            "an absent value elides its own token and leaves the row otherwise intact"
+        );
+    }
+
+    #[test]
+    fn a_row_of_only_absent_spend_is_omitted_entirely() {
+        let config = AgentsSidebarConfig {
+            rows: vec![vec![AgentSidebarToken::Spend]],
+            ..Default::default()
+        };
+        assert!(
+            agent_rows(&config, &entry(), "working").is_empty(),
+            "a fully unresolved row takes no space"
+        );
     }
 
     #[test]
@@ -513,6 +564,7 @@ mod presentation_layout_candidate {
             last_agent_state_change_seq: None,
             state_labels: std::collections::HashMap::new(),
             tokens: std::collections::HashMap::new(),
+            session_status: Default::default(),
         }
     }
 

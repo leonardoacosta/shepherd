@@ -386,6 +386,7 @@ Agent rows accept these built-in tokens:
 - `agent` — detected or reported agent display name.
 - `terminal_title` — latest OSC 0/2 terminal title after safety normalization.
 - `terminal_title_stripped` — the terminal title with one recognized leading activity or spinner glyph and its following whitespace removed.
+- `spend` — cumulative spend for the space's checkout, resolved by Shepherd itself. Shepherd runs the provider on its own schedule rather than waiting for an outside process to report a value in. An unavailable provider, or a figure the provider reports as stale, elides the token and its separator, exactly as an unresolved `$name` does.
 - `$name` — custom pane metadata named `name`.
 
 Space rows accept these built-in tokens:

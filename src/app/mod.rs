@@ -18,9 +18,11 @@ mod ids;
 mod input;
 mod popup;
 mod project_status_refresh;
+mod provider;
 mod runtime;
 mod runtime_mutations;
 mod session;
+mod session_provider_refresh;
 pub mod state;
 mod terminal_targets;
 mod terminal_titles;
@@ -42,6 +44,8 @@ const GIT_REPO_DISCOVERY_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60
 /// Deliberately slower than the Git tick: two subprocess spawns per checkout is a heavier
 /// idle cost than `git status`, and proposal/issue counts move on the order of minutes.
 const PROJECT_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+/// Session and provider telemetry moves slower than the work queue and much slower than Git.
+const SESSION_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(90);
 const AUTO_UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const PENDING_AGENT_RESUME_THEME_WAIT: Duration = Duration::from_millis(750);
 const SESSION_SAVE_DEBOUNCE: Duration = Duration::from_secs(5);
@@ -121,6 +125,8 @@ pub struct App {
     pub(crate) git_status_cache: HashMap<std::path::PathBuf, crate::workspace::GitStatusCacheEntry>,
     pub(crate) last_project_status_refresh: Instant,
     pub(crate) project_status_refresh_in_flight: bool,
+    pub(crate) last_session_status_refresh: Instant,
+    pub(crate) session_status_refresh_in_flight: bool,
     pub(crate) pending_api_worktree_creates: HashMap<std::path::PathBuf, u64>,
     pub(crate) pending_api_worktree_removes: HashMap<String, u64>,
     pub(crate) pending_api_worktree_remove_paths: HashMap<std::path::PathBuf, u64>,
@@ -762,6 +768,8 @@ impl App {
             git_status_cache: HashMap::new(),
             last_project_status_refresh: Instant::now() - PROJECT_STATUS_REFRESH_INTERVAL,
             project_status_refresh_in_flight: false,
+            last_session_status_refresh: Instant::now() - SESSION_STATUS_REFRESH_INTERVAL,
+            session_status_refresh_in_flight: false,
             pending_api_worktree_creates: HashMap::new(),
             pending_api_worktree_removes: HashMap::new(),
             pending_api_worktree_remove_paths: HashMap::new(),

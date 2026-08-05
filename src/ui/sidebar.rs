@@ -39,6 +39,10 @@ pub(crate) struct AgentPanelEntry {
     pub last_agent_state_change_seq: Option<u64>,
     pub state_labels: std::collections::HashMap<String, String>,
     pub tokens: std::collections::HashMap<String, String>,
+    /// Session and provider telemetry for this entry's space, resolved off the render path.
+    /// Carried on the entry for the same reason `SpaceTokenContext` carries project status:
+    /// the row renderer resolves tokens and must never reach back into `AppState`.
+    pub session_status: crate::workspace::SessionStatusSnapshot,
 }
 
 /// `sort: grouped`/`sort: priority`, so the header identifies itself as a
@@ -140,6 +144,7 @@ fn collect_agent_panel_entries_with_runtimes(
                         last_agent_state_change_seq: detail.last_agent_state_change_seq,
                         state_labels: detail.state_labels,
                         tokens: detail.tokens,
+                        session_status: ws.session_status(),
                     }
                 })
         })

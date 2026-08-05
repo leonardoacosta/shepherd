@@ -68,6 +68,9 @@ impl App {
             AppEvent::ProjectStatusRefreshed { results } => {
                 self.handle_project_status_refreshed(results)
             }
+            AppEvent::SessionStatusRefreshed { results } => {
+                self.handle_session_status_refreshed(results)
+            }
             ev => {
                 self.handle_internal_event(ev);
                 true
@@ -118,6 +121,24 @@ impl App {
         changed
     }
 
+    fn handle_session_status_refreshed(
+        &mut self,
+        results: Vec<crate::workspace::WorkspaceSessionStatus>,
+    ) -> bool {
+        let changed = results.iter().any(|result| {
+            self.state
+                .workspaces
+                .iter()
+                .any(|ws| ws.id == result.workspace_id && ws.session_status() != result.snapshot)
+        });
+        self.apply_session_status_results(results);
+        if changed {
+            self.render_dirty.store(true, Ordering::Release);
+            self.render_notify.notify_one();
+        }
+        changed
+    }
+
     pub(crate) fn handle_internal_event(&mut self, ev: AppEvent) {
         if let AppEvent::ClipboardWrite { content } = ev {
             #[cfg(not(test))]
@@ -155,6 +176,11 @@ impl App {
 
         if let AppEvent::ProjectStatusRefreshed { results } = ev {
             self.handle_project_status_refreshed(results);
+            return;
+        }
+
+        if let AppEvent::SessionStatusRefreshed { results } = ev {
+            self.handle_session_status_refreshed(results);
             return;
         }
 

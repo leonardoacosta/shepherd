@@ -17,6 +17,7 @@ use crate::terminal::{TerminalId, TerminalRuntime, TerminalRuntimeRegistry, Term
 mod aggregate;
 mod git;
 mod project_status;
+mod session_status;
 mod tab;
 
 #[cfg(test)]
@@ -32,6 +33,10 @@ pub use self::{
         parse_bead_open_and_blocked, parse_bead_ready, parse_proposal_counts, render_bead_counts,
         render_proposal_counts, BeadCounts, ProjectStatusRefreshDemand, ProjectStatusSnapshot,
         ProposalCounts, WorkspaceProjectStatus,
+    },
+    session_status::{
+        parse_spend_status, render_spend_status, SessionStatusRefreshDemand, SessionStatusSnapshot,
+        SpendStatus, WorkspaceSessionStatus,
     },
     tab::{NewPane, Tab},
 };
@@ -198,6 +203,11 @@ pub struct Workspace {
     /// `cached_git_status_key` (the repo): linked worktrees hold separate `openspec/changes/`
     /// and issue-database contents, so they must not share an entry.
     pub(crate) cached_project_status_key: Option<PathBuf>,
+    /// Cached session and provider telemetry, keyed by `cached_session_status_key`.
+    pub(crate) cached_session_status: SessionStatusSnapshot,
+    /// Checkout this workspace's cached session status was derived from. Keyed the same way
+    /// as project status so the two refreshes agree on what a checkout is.
+    pub(crate) cached_session_status_key: Option<PathBuf>,
     /// Explicit Shepherd-managed worktree grouping provenance.
     pub worktree_space: Option<WorktreeSpaceMembership>,
     pub(crate) metadata_tokens: crate::metadata_tokens::MetadataTokens,
@@ -267,6 +277,8 @@ impl Workspace {
             cached_git_space,
             cached_project_status: ProjectStatusSnapshot::default(),
             cached_project_status_key: None,
+            cached_session_status: SessionStatusSnapshot::default(),
+            cached_session_status_key: None,
             worktree_space: None,
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
             metadata_token_sequences: HashMap::new(),
@@ -457,6 +469,8 @@ impl Workspace {
                 cached_git_space,
                 cached_project_status: ProjectStatusSnapshot::default(),
                 cached_project_status_key: None,
+                cached_session_status: SessionStatusSnapshot::default(),
+                cached_session_status_key: None,
                 worktree_space: None,
                 metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
                 metadata_token_sequences: HashMap::new(),
@@ -1183,6 +1197,21 @@ impl Workspace {
         self.cached_project_status = snapshot;
     }
 
+    pub fn session_status(&self) -> SessionStatusSnapshot {
+        self.cached_session_status
+    }
+
+    /// The checkout this workspace's session status is keyed by. Shares `project_status_key`'s
+    /// definition of a checkout so the two refreshes cannot disagree about what they cache.
+    pub(crate) fn session_status_key(&self) -> Option<PathBuf> {
+        self.project_status_key()
+    }
+
+    pub(crate) fn apply_session_status(&mut self, key: PathBuf, snapshot: SessionStatusSnapshot) {
+        self.cached_session_status_key = Some(key);
+        self.cached_session_status = snapshot;
+    }
+
     pub fn git_space(&self) -> Option<&GitSpaceMetadata> {
         self.cached_git_space.as_ref()
     }
@@ -1311,6 +1340,8 @@ impl Workspace {
             cached_git_space: None,
             cached_project_status: ProjectStatusSnapshot::default(),
             cached_project_status_key: None,
+            cached_session_status: SessionStatusSnapshot::default(),
+            cached_session_status_key: None,
             worktree_space: None,
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
             metadata_token_sequences: HashMap::new(),

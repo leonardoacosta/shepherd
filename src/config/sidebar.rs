@@ -111,6 +111,8 @@ pub enum AgentSidebarToken {
     Agent,
     TerminalTitle,
     TerminalTitleStripped,
+    /// Cumulative spend, resolved by Shepherd's own session-provider refresh.
+    Spend,
     Custom(String),
     Styled {
         token: Box<AgentSidebarToken>,
@@ -243,6 +245,7 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
         AgentSidebarToken::Agent => "agent".into(),
         AgentSidebarToken::TerminalTitle => "terminal_title".into(),
         AgentSidebarToken::TerminalTitleStripped => "terminal_title_stripped".into(),
+        AgentSidebarToken::Spend => "spend".into(),
         AgentSidebarToken::Custom(name) => format!("${name}"),
         AgentSidebarToken::Styled { token, .. } => agent_token_name(token),
     }
@@ -299,6 +302,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
                 ("agent", Self::Agent),
                 ("terminal_title", Self::TerminalTitle),
                 ("terminal_title_stripped", Self::TerminalTitleStripped),
+                ("spend", Self::Spend),
             ],
         )
         .map_err(serde::de::Error::custom)?;
@@ -480,6 +484,42 @@ mod tests {
             0
         };
         assert_eq!(reserved, 0);
+    }
+
+    #[test]
+    fn spend_token_parses_round_trips_and_is_rejected_when_misspelled() {
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[ui.topbar]
+enabled = true
+rows = [["workspace", { token = "spend", dim = true }]]
+"#,
+        )
+        .expect("spend is a documented agent token");
+
+        assert_eq!(
+            config.ui.topbar.rows,
+            vec![vec![
+                AgentSidebarToken::Workspace,
+                AgentSidebarToken::Styled {
+                    token: Box::new(AgentSidebarToken::Spend),
+                    style: SidebarTokenStyle {
+                        dim: Some(true),
+                        ..Default::default()
+                    },
+                },
+            ]]
+        );
+        assert_eq!(agent_token_name(&AgentSidebarToken::Spend), "spend");
+
+        // A bare unknown name must not silently degrade to an absent token at render time.
+        assert!(
+            toml::from_str::<crate::config::Config>(
+                "[ui.topbar]\nenabled = true\nrows = [[\"spend_usd\"]]\n"
+            )
+            .is_err(),
+            "an unknown bare token is a configuration error, not an elision"
+        );
     }
 
     #[test]

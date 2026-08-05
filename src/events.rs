@@ -147,6 +147,10 @@ pub enum AppEvent {
     ProjectStatusRefreshed {
         results: Vec<crate::workspace::WorkspaceProjectStatus>,
     },
+    /// Background session and provider status refresh completed for workspaces.
+    SessionStatusRefreshed {
+        results: Vec<crate::workspace::WorkspaceSessionStatus>,
+    },
     /// A plugin action or event command finished.
     PluginCommandFinished {
         log_id: String,

@@ -298,6 +298,7 @@ impl App {
 
         self.start_git_status_refresh_if_due(now);
         self.start_project_status_refresh_if_due(now);
+        self.start_session_status_refresh_if_due(now);
 
         if self
             .next_auto_update_check
@@ -543,6 +544,9 @@ impl App {
             // slower interval and must not be pulled forward by a Git tick.
             include_git_refresh
                 .then(|| self.project_status_refresh_deadline())
+                .flatten(),
+            include_git_refresh
+                .then(|| self.session_status_refresh_deadline())
                 .flatten(),
             self.next_auto_update_check,
             self.next_agent_manifest_update_check,

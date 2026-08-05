@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Added a `spend` Agent token that Shepherd resolves itself. Shepherd owns the cached value, schedules its own refresh off the render path, and invokes the provider on its own cadence rather than waiting for an outside process to report a value in. An unavailable provider, a non-zero exit, a timeout, an unparseable body, or a figure the provider reports as stale all elide the token and its separator, and never affect another token. Configuring no `spend` token runs no provider at all. Existing `$name` metadata tokens are unchanged.
 - Connections to the Shepherd socket from a process running as a different user are now rejected on Linux and macOS.
 - Added Display settings and disabled-by-default config for a token-driven desktop topbar and an interactive workspace plugin dock, including explicit eligible-pane launch, auxiliary input focus, restore-safe hidden backing tabs, and compatible Unix live-handoff preservation.
 - Settings now manages integration targets individually, with per-target install, update, and confirmed uninstall actions, a single in-flight operation, and per-target results reachable as a short summary plus a scrollable operation history. Unsupported or not-found targets stay listed with their reason instead of disappearing, and uninstall names the exact target and install path before confirming.

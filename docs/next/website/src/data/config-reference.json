@@ -700,6 +700,7 @@
             "agent",
             "terminaltitle",
             "terminaltitlestripped",
+            "spend",
             "custom"
           ]
         },
@@ -729,6 +730,7 @@
             "agent",
             "terminaltitle",
             "terminaltitlestripped",
+            "spend",
             "custom"
           ]
         },

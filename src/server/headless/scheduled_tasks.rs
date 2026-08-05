@@ -76,6 +76,7 @@ pub(super) fn handle_scheduled_tasks_headless(
     if server.has_app_client() {
         server.app.start_git_status_refresh_if_due(now);
         server.app.start_project_status_refresh_if_due(now);
+        server.app.start_session_status_refresh_if_due(now);
     }
 
     if server
