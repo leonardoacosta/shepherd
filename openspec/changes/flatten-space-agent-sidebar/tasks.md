@@ -7,6 +7,26 @@ split)`), so removing it first forces throwaway stubs at every call site that th
 then deletes, and leaves the tree uncompilable in between. The merge and the removal must land in
 one pass, render first. Sections 2 and 3 below are that single pass.
 
+**Implementation notes (proven by a second attempt, then reverted).** These were verified
+against the tree at `d4cc7816` — the builder compiled and its tests passed before the revert:
+
+- **Do not widen `WorkspaceListEntry`.** It has 49 references across `src/ui.rs`,
+  `src/ui/sidebar.rs`, `src/ui/mobile.rs`, `src/app/actions.rs`, and
+  `src/app/input/sidebar.rs`, and the mobile switcher iterates the same list — adding agent
+  variants changes mobile too. Add a separate `SidebarRow { Space, Agent, NoAgents }` enum and a
+  `sidebar_rows(app, &sorted_entries)` builder alongside it. That shape passed four row-model
+  tests covering ordering, the empty state, no-tab-rows, and sort pass-through.
+- **`compute_workspace_list_areas`'s second tuple slot is an unused `Vec<()>`.** Repurpose it for
+  the agent row rects rather than adding a parallel function; a single walk of `sidebar_rows`
+  then produces space and agent geometry together and they cannot drift apart.
+- **Geometry and render must land in the same increment.** Emitting agent rects without
+  rendering them leaves visible gaps where agents belong, so an interleaved-geometry-only commit
+  is a user-visible regression and must not be committed on its own.
+- **Exactly one existing test fails on interleaved geometry**:
+  `app::actions::tests::switch_workspace_keeps_selected_visible_in_scrolled_sidebar`. It fails
+  because the scroll model still measures spaces only, which is precisely the scope of task 2.7 —
+  treat it as that task's acceptance test rather than adjusting the assertion.
+
 ## 1. Record the baseline
 
 - [ ] 1.1 The characterization coverage this change needs already exists — do not write
