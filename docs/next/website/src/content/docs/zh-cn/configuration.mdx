@@ -373,6 +373,18 @@ Agent 行支持以下内置 token：
 - `terminal_title` — 经过安全规范化的最新 OSC 0/2 终端标题。
 - `terminal_title_stripped` — 从终端标题开头移除一个可识别的活动或旋转指示符字形及其后空白后的结果。
 - `spend` — 该空间检出目录的累计花费，由 Shepherd 自行解析。Shepherd 按自己的节奏运行提供方，而不是等待外部进程上报数值。当提供方不可用，或提供方报告该数值已过期时，会省略该令牌及其分隔符，与未解析的 `$name` 行为一致。
+- `savings` — 来自 `llmtrim` 源、通过提示缓存节省的累计金额，解析方式与 `spend` 相同，来自同一个 `llmtrim` 源。与 `spend` 相互独立地省略——缺失 `llmtrim` 二进制文件会同时省略两者，但其他情况下不会只省略其中一个。
+- `cache_read_tokens` — 来自 `llmtrim` 的累计缓存读取 token 数。
+- `instruction_total_bytes` — 从 `context-floor`（与 `llmtrim` 不同的独立提供方）解析出的指令预算总字节数。当 `context-floor` 不可用时，下面四个 token 会一起省略，与其他来源相互独立。
+- `instruction_floor_warn` — 仅当 `context-floor` 报告其 floor 警告状态为激活时才会渲染；否则该 token 会像未解析的值一样被省略。
+- `instruction_growth_pct` — 自上次观测以来指令预算的增长百分比。
+- `instruction_dollars_per_1k_turns` — 指令预算每 1000 轮的预估美元成本。
+- `model` — 从 Shepherd 自身的持久化会话快照存储中解析出的会话模型名称。当该存储无法解析时，本项与下面三个 token 会一起省略，与其他来源相互独立。
+- `context_tokens` — 会话当前的上下文窗口 token 数。
+- `context_window_tokens` — 会话的上下文窗口大小。
+- `session_count` — 持久化会话存储中当前的会话数量。
+- `quota_remaining` — 所有本地跟踪账户中，具有新鲜且完整使用数据的账户的剩余配额总和。从 Shepherd 自身的凭据状态目录只读解析，与其他来源相互独立地省略。
+- `reset_at` — 处于冷却状态的本地跟踪账户中，最早的冷却重置时间。
 - `$name` — 名为 `name` 的自定义窗格元数据。
 
 Space 行支持以下内置 token：

@@ -387,6 +387,18 @@ Agent rows accept these built-in tokens:
 - `terminal_title` — latest OSC 0/2 terminal title after safety normalization.
 - `terminal_title_stripped` — the terminal title with one recognized leading activity or spinner glyph and its following whitespace removed.
 - `spend` — cumulative spend for the space's checkout, resolved by Shepherd itself. Shepherd runs the provider on its own schedule rather than waiting for an outside process to report a value in. An unavailable provider, or a figure the provider reports as stale, elides the token and its separator, exactly as an unresolved `$name` does.
+- `savings` — cumulative savings from prompt caching, resolved the same way as `spend` and from the same `llmtrim` source. Elides independently of `spend` — a missing `llmtrim` binary elides both, but nothing else does.
+- `cache_read_tokens` — cumulative cache-read token count from `llmtrim`.
+- `instruction_total_bytes` — the instruction-budget's total byte count, resolved from `context-floor`, a separate provider from `llmtrim`. Its four tokens below elide together when `context-floor` is unavailable, independently of every other source.
+- `instruction_floor_warn` — renders only when `context-floor` reports its floor-warning state as active; otherwise the token elides, the same as an absent value.
+- `instruction_growth_pct` — the instruction budget's growth percentage since the prior observation.
+- `instruction_dollars_per_1k_turns` — the instruction budget's estimated dollar cost per 1,000 turns.
+- `model` — the session's model name, resolved from Shepherd's own persisted session snapshot store. This and the three tokens below elide together when that store is unresolvable, independently of every other source.
+- `context_tokens` — the session's current context-window token count.
+- `context_window_tokens` — the session's context-window size.
+- `session_count` — how many sessions are currently in the persisted session store.
+- `quota_remaining` — total remaining quota across every locally tracked account with fresh, complete usage data. Resolved read-only from Shepherd's own credential state directory; elides independently of every other source.
+- `reset_at` — the earliest cooldown reset time among locally tracked accounts on cooldown.
 - `$name` — custom pane metadata named `name`.
 
 Space rows accept these built-in tokens:

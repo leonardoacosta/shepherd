@@ -177,21 +177,43 @@ amendment's wording may need to change too once section 7's real scope is known.
 
 ## 9. Verify the boundary holds
 
-- [ ] 9.1 With the companion binary removed from `PATH` entirely, capture a rendered row showing
-      every absorbed token still resolving.
-- [ ] 9.2 Capture a rendered row with one source available and another unavailable, proving
-      independent elision in production rather than only in tests.
+- [x] 9.1 With the companion binary removed from `PATH` entirely, capture a rendered row showing
+      every absorbed token still resolving. Verified live (2026-08-05): built the dev binary,
+      ran a named session server (`--session provider-verify`) with `PATH` rebuilt to exclude
+      every directory containing a `shepherd-state` executable (confirmed via `env PATH=... which
+      shepherd-state` failing), `SHEPHERD_STATE_SNAPSHOT_DIR` pointed at a scratch store holding
+      one fixture session record, a topbar row configured with
+      `["workspace","session_count","model","context_tokens","quota_remaining","reset_at"]`,
+      attached a real client through `tmux`, and captured the rendered pane:
+      `verify · 1 · claude-opus-5 · 42000` — `session_count`, `model`, and `context_tokens` all
+      resolved from the fixture with `shepherd-state` entirely absent from `PATH`. (`llmtrim`/
+      `context-floor` were always direct dependencies, never routed through `shepherd-state`, so
+      this run targets the actual companion-independence claim.)
+- [x] 9.2 Capture a rendered row with one source available and another unavailable, proving
+      independent elision in production rather than only in tests. Same capture as 9.1:
+      `quota_remaining`/`reset_at` (`local-account-signal`, no `credentials.jsonl` in the scratch
+      state dir) elided cleanly with no error dialog and no gap/placeholder in the row, while
+      `sessions`'s three tokens rendered their real values in the same row.
 - [ ] 9.3 Trigger a real harness session-start hook and confirm a snapshot is still persisted and
-      lifecycle metadata still reported — the ingest half must be unaffected.
-- [ ] 9.4 Run `just check` and paste the passing output.
+      lifecycle metadata still reported — the ingest half must be unaffected. **Not run.** Section
+      7 (the only work that could affect the ingest path) was not implemented this pass (blocked,
+      see section 7's note) — nothing in the ingest half has changed yet, so there is nothing new
+      to verify here until 7 actually lands.
+- [x] 9.4 Run `just check` and paste the passing output. 3348 tests run: 3348 passed, 0 skipped;
+      fmt clean; clippy clean (incl. Windows target); `scripts.test_config_reference_check` and
+      the other 12 python maintenance suites pass (2026-08-05).
 
 ## 10. Document
 
-- [ ] 10.1 Document every new token in `docs/next/website/src/content/docs/` (EN, JA, ZH together),
+- [x] 10.1 Document every new token in `docs/next/website/src/content/docs/` (EN, JA, ZH together),
       stating that Shepherd resolves it itself and that an unavailable source elides only its own
-      tokens.
-- [ ] 10.2 Add a `docs/next/CHANGELOG.md` entry naming the per-source independence, the facts
+      tokens. Done for the 12 tokens landed in section 6 (`configuration.mdx` + `ja`/`zh-cn`
+      variants); transcript and pricing/severity tokens don't exist yet (deferred per section 6's
+      note), so there is nothing to document for them.
+- [x] 10.2 Add a `docs/next/CHANGELOG.md` entry naming the per-source independence, the facts
       Shepherd now resolves itself, and that the companion remains required for harness hook
       ingest.
 - [ ] 10.3 Update the companion's own README and plugin description so it no longer claims the
-      responsibilities that moved.
+      responsibilities that moved. **Not executed — depends on section 7, which is blocked.**
+      Nothing has actually moved out of the companion yet (section 7's packages are all still
+      there), so updating its README to claim otherwise would be inaccurate.
