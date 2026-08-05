@@ -244,3 +244,217 @@ rows = [
         assert!(resolved_rows(&app).is_empty());
     }
 }
+
+/// Rendered-evidence characterization for `research-presentation-layout-presets`.
+/// Renders named topbar candidate row layouts through production token
+/// resolution (`sidebar::tokens::agent_rows_from`, the same call `resolved_rows`
+/// makes) and production cell rendering (`sidebar::resolved_token_spans`) at the
+/// widths declared in the change's `evidence/layouts.md`. Not a runtime behavior
+/// change — read-only drift characterization the terminal user gate consults.
+#[cfg(test)]
+mod presentation_layout_candidate {
+    use super::sidebar::AgentPanelEntry;
+    use super::{sidebar, state_dot};
+    use crate::config::AgentSidebarToken;
+    use crate::detect::AgentState;
+    use ratatui::style::Style;
+
+    fn entry(
+        primary_label: &str,
+        tab: Option<&str>,
+        pane: Option<&str>,
+        agent_label: Option<&str>,
+        agent: Option<crate::detect::Agent>,
+        state: AgentState,
+        seen: bool,
+    ) -> AgentPanelEntry {
+        AgentPanelEntry {
+            ws_idx: 0,
+            tab_idx: 0,
+            pane_id: crate::layout::PaneId::from_raw(1),
+            primary_label: primary_label.into(),
+            primary_tab_label: tab.map(str::to_string),
+            pane_label: pane.map(str::to_string),
+            terminal_title: None,
+            terminal_title_stripped: None,
+            agent_label: agent_label.map(str::to_string),
+            agent_kind_label: agent_label.map(str::to_string),
+            agent,
+            state,
+            seen,
+            last_agent_state_change_seq: None,
+            state_labels: std::collections::HashMap::new(),
+            tokens: std::collections::HashMap::new(),
+        }
+    }
+
+    struct Case {
+        name: &'static str,
+        entry: AgentPanelEntry,
+        state_text: &'static str,
+    }
+
+    fn cases() -> Vec<Case> {
+        vec![
+            Case {
+                name: "representative",
+                entry: entry(
+                    "shepherd",
+                    Some("feature-auth"),
+                    Some("review pane"),
+                    Some("claude"),
+                    Some(crate::detect::Agent::Claude),
+                    AgentState::Working,
+                    true,
+                ),
+                state_text: "working",
+            },
+            Case {
+                name: "long",
+                entry: entry(
+                    "backend-services-payment-orchestration-monorepo",
+                    Some("refactor-billing-reconciliation-pipeline"),
+                    Some("review pane for the billing reconciliation output"),
+                    Some("claude-opus-5-sonnet-reasoning"),
+                    Some(crate::detect::Agent::Claude),
+                    AgentState::Blocked,
+                    true,
+                ),
+                state_text: "blocked",
+            },
+            Case {
+                name: "missing",
+                entry: entry(
+                    "solo-workspace",
+                    None,
+                    None,
+                    None,
+                    None,
+                    AgentState::Unknown,
+                    true,
+                ),
+                state_text: "idle",
+            },
+        ]
+    }
+
+    fn candidates() -> Vec<(&'static str, Vec<Vec<AgentSidebarToken>>)> {
+        vec![
+            (
+                "baseline-workspace-only",
+                vec![vec![AgentSidebarToken::Workspace]],
+            ),
+            (
+                "workspace-tab",
+                vec![vec![AgentSidebarToken::Workspace, AgentSidebarToken::Tab]],
+            ),
+            (
+                "workspace-agent-two-row",
+                vec![
+                    vec![AgentSidebarToken::Workspace],
+                    vec![AgentSidebarToken::Agent],
+                ],
+            ),
+            (
+                "full-context",
+                vec![
+                    vec![
+                        AgentSidebarToken::Workspace,
+                        AgentSidebarToken::Tab,
+                        AgentSidebarToken::Pane,
+                    ],
+                    vec![AgentSidebarToken::Agent],
+                ],
+            ),
+            (
+                "status-first",
+                vec![vec![
+                    AgentSidebarToken::StateIcon,
+                    AgentSidebarToken::StateText,
+                    AgentSidebarToken::Workspace,
+                ]],
+            ),
+        ]
+    }
+
+    #[test]
+    fn topbar_candidates_render_within_declared_widths() {
+        let palette = crate::app::AppState::test_new().palette;
+        let widths = [40usize, 80];
+
+        for (candidate_name, rows_config) in candidates() {
+            for case in cases() {
+                let resolved =
+                    sidebar::tokens::agent_rows_from(&rows_config, &case.entry, case.state_text);
+                let icon = state_dot(case.entry.state, case.entry.seen, &palette);
+                for width in widths {
+                    let lines: Vec<String> = resolved
+                        .iter()
+                        .map(|row| {
+                            sidebar::resolved_token_spans(
+                                row,
+                                icon,
+                                Style::default(),
+                                Style::default(),
+                                Style::default(),
+                                Style::default(),
+                                &palette,
+                                width,
+                            )
+                            .iter()
+                            .map(|span| span.content.as_ref())
+                            .collect::<String>()
+                        })
+                        .collect();
+                    for line in &lines {
+                        assert!(
+                            crate::ui::text::display_width(line) <= width,
+                            "{candidate_name}/{}/{width}: {line:?} exceeds declared width",
+                            case.name
+                        );
+                    }
+                    println!(
+                        "TOPBAR|{candidate_name}|{}|{width}|{}",
+                        case.name,
+                        lines.join(" \u{23ce} ")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn topbar_missing_tab_and_pane_elide_from_full_context_row() {
+        let (_, rows_config) = candidates()
+            .into_iter()
+            .find(|(name, _)| *name == "full-context")
+            .expect("full-context candidate defined above");
+        let representative = cases().remove(0);
+        let missing = cases().remove(2);
+
+        let representative_rows = sidebar::tokens::agent_rows_from(
+            &rows_config,
+            &representative.entry,
+            representative.state_text,
+        );
+        let missing_rows =
+            sidebar::tokens::agent_rows_from(&rows_config, &missing.entry, missing.state_text);
+
+        assert_eq!(
+            representative_rows[0].len(),
+            3,
+            "workspace, tab, and pane all resolve when populated"
+        );
+        assert_eq!(
+            missing_rows.len(),
+            1,
+            "the workspace/tab/pane row survives on workspace alone; the agent-only \
+             second row elides entirely without an agent"
+        );
+        assert_eq!(
+            missing_rows[0].len(),
+            1,
+            "tab and pane elide individually inside the row when absent"
+        );
+    }
+}

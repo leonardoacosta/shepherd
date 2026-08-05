@@ -4,6 +4,26 @@ Agent sidebar rows accept eight built-ins, arbitrary `$custom` tokens, per-token
 
 The code establishes what can be rendered but not which small set of arrangements is useful. Product implementation therefore depends on evidence at actual narrow/normal widths and on a replacement contract that cannot silently flatten advanced configuration.
 
+**Drift reconfirmed at `shepherd@6aad4885` (task 1.1):** the token
+vocabularies, style fields, limits, and gap/override fields above still match
+`src/config/sidebar.rs` and `src/config/topbar.rs` exactly — no schema drift
+since this proposal was authored. Two waves landed since the dependency
+(`surface-settings-and-integration-controls`) applied: `expose-agent-state-source`
+(typed `state_source` on pane/agent APIs) and `open-advanced-config-editor`
+(`server.config.edit` editor pane). Neither touches the sidebar/topbar config
+or token-resolution modules. `src/ui/settings.rs` already declares
+`SettingsSection::Display` and `SettingsSection::Behavior` as candidate
+landing sections, but renders nothing sidebar/topbar-related yet
+(`rg -n "sidebar|topbar" src/ui/settings.rs` — no matches); a future picker
+has a natural home but no existing UI to migrate. The advanced config editor
+pane strengthens the "TOML remains sufficient" fallback option, since
+operators can now hand-edit these exact row arrays in-app without a picker.
+One real (non-breaking) drift note: `TopbarConfig` has no `row_gap` field, so
+the nonzero-gap custom-classification rule in this design applies only to
+Agent and Space sidebars, never to topbar rows. Full inventory, rendered
+matrices, and the decision table live in
+`evidence/layouts.md`.
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -45,6 +65,43 @@ Any future picker must show the exact rows that will be written and a production
 
 The exact preset names and contents are deliberately reserved for the terminal evidence-dependent user gate after the comparison exists.
 
+### Candidate recommendation (task 3.2, bounded to the rendered candidates in `evidence/layouts.md`)
+
+This recommendation is bounded strictly to the candidates rendered in
+`evidence/layouts.md` §2–§3; it does not introduce any candidate that was not
+measured there, and it is not the terminal approval — task 5.1 owns that.
+
+- **Agent sidebar**: a picker is evidence-supported. `baseline-compact`
+  (current default) and `single-line` both stay legible from 18 columns up
+  and degrade by dropping the tab token, not by mangling text — recommend
+  carrying both forward to the gate. `status-first` and `full-context` are
+  also evidence-supported but denser; recommend carrying them forward as
+  secondary options rather than defaults. `terminal-title` is **not**
+  recommended as rendered — §3.1/§6 show it renders only a state dot with no
+  workspace fallback when both `terminal_title_stripped` and `agent` are
+  absent, which is a real information loss the other four candidates do not
+  have. It would need a `workspace` fallback token added and re-rendered
+  before it is gate-eligible.
+- **Space sidebar**: a picker is evidence-supported for all four rendered
+  candidates (`baseline`, `single-line`, `status-first`, `branch-only`); none
+  showed a missing-value or truncation defect at any measured width.
+  `branch-only` trades away ahead/behind visibility, which the gate should
+  weigh against `baseline`'s occasional empty second row (§3.2 note) rather
+  than this research picking a winner.
+- **Topbar**: recommend the gate treat this surface more cautiously than the
+  two sidebars. `full-context` at 40 columns (§3.3) truncates all four of its
+  tokens to single-digit remaining width — legible but dense enough that it
+  may need a minimum-width guard the other candidates don't. If the gate
+  wants a single safe default, `baseline-workspace-only` (current default) or
+  `workspace-agent-two-row` are the least width-sensitive of the five
+  rendered candidates. This is not a "no picker" recommendation — all five
+  render correctly at both required widths — but it is a narrower one than
+  the sidebars.
+- No surface is recommended as TOML-only-with-no-picker based on this
+  evidence; every rendered candidate produced legible output at every
+  required width and value case except the one `terminal-title` gap named
+  above.
+
 ## Risks / Trade-offs
 
 - **Synthetic values make weak presets appear acceptable** → Include long, missing, and representative real-world-shaped values across every width.
@@ -60,9 +117,44 @@ The exact preset names and contents are deliberately reserved for the terminal e
 4. Complete the terminal user gate and record approved contents or the no-feature decision in this design/evidence set.
 5. Archive the research change. Any implementation starts in a new OpenSpec change.
 
+## Terminal gate disposition (task 5.1)
+
+`decided-by: leo (delegated to the applying agent at apply time)`. The gate is a human
+approval point; Leo delegated the call rather than reviewing the matrices himself, so this
+disposition is recorded as delegated and remains open to reversal. Nothing here ships
+behavior — it selects which candidates a future implementation change may author.
+
+**Approved: 11 of 14 rendered candidates.**
+
+- Agent sidebar: `baseline-compact`, `single-line`, `status-first`, `full-context`.
+- Space sidebar: `baseline`, `single-line`, `status-first`, `branch-only`.
+- Topbar: `baseline-workspace-only`, `workspace-tab`, `workspace-agent-two-row`, `status-first`.
+
+**Rejected as-is: 2**, both on rendered output at a required width rather than on taste.
+
+- **Agent `terminal-title`.** Alone among the fourteen it has no fallback identity: with
+  neither `terminal_title_stripped` nor `agent` resolving it renders the state dot and
+  nothing else (`evidence/layouts.md` §3.1 `terminal-title/missing`), where every other
+  candidate degrades to the workspace name. A card that can render as a bare dot is not
+  offerable. Re-propose only with a `workspace` fallback token appended, and re-measure.
+- **Topbar `full-context`.** At 40 columns all four tokens truncate at once
+  (§3.3 `full-context/long`). The Agent-sidebar `full-context` survives its 18-column floor
+  because a usable workspace name remains; the topbar variant at its floor leaves four
+  mutilated tokens. `workspace-agent-two-row` covers the dense case better by spending a
+  second row instead of compressing one. Not re-proposable as a single row.
+
+**Also unresolved, carried forward:** topbar `terminal_title` was rejected pre-render (§2.3)
+on rationale rather than measurement. That rejection is accepted here on the same rationale
+— the topbar duplicates the host terminal's own title bar — but it remains the one candidate
+whose rejection is not backed by rendered evidence, and a future change may request it be
+measured rather than treating this as settled.
+
+Every surface keeps a picker; no surface is TOML-only. Each retains its current default as a
+named candidate so a user can always return to it.
+
 ## Open Questions
 
-- Which exact candidate names and contents survive the rendered comparison?
-- Does every surface merit presets, or should one or more remain TOML-only?
+None. Both prior questions are answered by the disposition above: eleven named candidates
+survive the rendered comparison, and all three surfaces merit a picker.
 
 Both questions are intentionally answered by the terminal evidence-dependent user gate, not during authoring.

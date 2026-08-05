@@ -341,3 +341,441 @@ mod tests {
         );
     }
 }
+
+/// Rendered-evidence characterization for `research-presentation-layout-presets`.
+/// Renders named candidate row layouts through production token resolution
+/// (`agent_rows_from` / `space_rows`) and production cell rendering
+/// (`sidebar::resolved_token_spans`) at the widths declared in the change's
+/// `evidence/layouts.md`. Not a runtime behavior change — read-only drift
+/// characterization the terminal user gate consults.
+#[cfg(test)]
+mod presentation_layout_candidate {
+    use super::*;
+    use crate::config::AgentSidebarToken;
+    use crate::detect::AgentState;
+    use ratatui::style::Style;
+
+    fn agent_entry(
+        primary_label: &str,
+        tab: Option<&str>,
+        pane: Option<&str>,
+        agent_label: Option<&str>,
+        terminal_title: Option<&str>,
+        terminal_title_stripped: Option<&str>,
+        agent: Option<crate::detect::Agent>,
+        state: AgentState,
+        seen: bool,
+    ) -> AgentPanelEntry {
+        AgentPanelEntry {
+            ws_idx: 0,
+            tab_idx: 0,
+            pane_id: crate::layout::PaneId::from_raw(1),
+            primary_label: primary_label.into(),
+            primary_tab_label: tab.map(str::to_string),
+            pane_label: pane.map(str::to_string),
+            terminal_title: terminal_title.map(str::to_string),
+            terminal_title_stripped: terminal_title_stripped.map(str::to_string),
+            agent_label: agent_label.map(str::to_string),
+            agent_kind_label: agent_label.map(str::to_string),
+            agent,
+            state,
+            seen,
+            last_agent_state_change_seq: None,
+            state_labels: std::collections::HashMap::new(),
+            tokens: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Renders each resolved row through the production span renderer and
+    /// flattens spans to plain text, mirroring how `render_agent_detail` /
+    /// `render_topbar` compose a row's visible content.
+    fn render_rows(
+        resolved: &[Vec<ResolvedToken>],
+        state_icon: (&str, Style),
+        width: usize,
+        palette: &crate::app::state::Palette,
+    ) -> Vec<String> {
+        resolved
+            .iter()
+            .map(|row| {
+                super::super::resolved_token_spans(
+                    row,
+                    state_icon,
+                    Style::default(),
+                    Style::default(),
+                    Style::default(),
+                    Style::default(),
+                    palette,
+                    width,
+                )
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+            })
+            .collect()
+    }
+
+    struct AgentCase {
+        name: &'static str,
+        entry: AgentPanelEntry,
+        state_text: &'static str,
+    }
+
+    fn agent_cases() -> Vec<AgentCase> {
+        vec![
+            AgentCase {
+                name: "representative",
+                entry: agent_entry(
+                    "shepherd",
+                    Some("feature-auth"),
+                    Some("review pane"),
+                    Some("claude"),
+                    Some("\u{280b} building"),
+                    Some("building"),
+                    Some(crate::detect::Agent::Claude),
+                    AgentState::Working,
+                    true,
+                ),
+                state_text: "working",
+            },
+            AgentCase {
+                name: "long",
+                entry: agent_entry(
+                    "backend-services-payment-orchestration-monorepo",
+                    Some("refactor-billing-reconciliation-pipeline"),
+                    Some("review pane for the billing reconciliation output"),
+                    Some("claude-opus-5-sonnet-reasoning"),
+                    Some("\u{280b} 修复用户认证模块并迁移到统一登录服务超长标题"),
+                    Some("修复用户认证模块并迁移到统一登录服务超长标题"),
+                    Some(crate::detect::Agent::Claude),
+                    AgentState::Blocked,
+                    true,
+                ),
+                state_text: "blocked",
+            },
+            AgentCase {
+                name: "missing",
+                entry: agent_entry(
+                    "solo-workspace",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    AgentState::Unknown,
+                    true,
+                ),
+                state_text: "idle",
+            },
+        ]
+    }
+
+    fn agent_candidates() -> Vec<(&'static str, Vec<Vec<AgentSidebarToken>>)> {
+        vec![
+            (
+                "baseline-compact",
+                vec![
+                    vec![
+                        AgentSidebarToken::StateIcon,
+                        AgentSidebarToken::Workspace,
+                        AgentSidebarToken::Tab,
+                    ],
+                    vec![AgentSidebarToken::Agent],
+                ],
+            ),
+            (
+                "single-line",
+                vec![vec![
+                    AgentSidebarToken::StateIcon,
+                    AgentSidebarToken::Workspace,
+                    AgentSidebarToken::Agent,
+                ]],
+            ),
+            (
+                "status-first",
+                vec![
+                    vec![AgentSidebarToken::StateIcon, AgentSidebarToken::StateText],
+                    vec![AgentSidebarToken::Workspace, AgentSidebarToken::Tab],
+                    vec![AgentSidebarToken::Agent],
+                ],
+            ),
+            (
+                "terminal-title",
+                vec![
+                    vec![
+                        AgentSidebarToken::StateIcon,
+                        AgentSidebarToken::TerminalTitleStripped,
+                    ],
+                    vec![AgentSidebarToken::Agent],
+                ],
+            ),
+            (
+                "full-context",
+                vec![
+                    vec![
+                        AgentSidebarToken::StateIcon,
+                        AgentSidebarToken::Workspace,
+                        AgentSidebarToken::Tab,
+                    ],
+                    vec![AgentSidebarToken::Pane, AgentSidebarToken::Agent],
+                ],
+            ),
+        ]
+    }
+
+    #[test]
+    fn agent_candidates_render_within_declared_sidebar_widths() {
+        let palette = crate::app::AppState::test_new().palette;
+        let widths = [18usize, 24, 36];
+
+        for (candidate_name, rows_config) in agent_candidates() {
+            for case in agent_cases() {
+                let resolved = agent_rows_from(&rows_config, &case.entry, case.state_text);
+                let state_icon =
+                    crate::ui::status::state_dot(case.entry.state, case.entry.seen, &palette);
+                for width in widths {
+                    let lines = render_rows(&resolved, state_icon, width, &palette);
+                    for line in &lines {
+                        assert!(
+                            crate::ui::text::display_width(line) <= width,
+                            "{candidate_name}/{}/{width}: {line:?} exceeds declared width",
+                            case.name
+                        );
+                    }
+                    println!(
+                        "AGENT|{candidate_name}|{}|{width}|{}",
+                        case.name,
+                        lines.join(" \u{23ce} ")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn agent_missing_fields_elide_rows_and_reduce_row_count_versus_representative() {
+        let palette = crate::app::AppState::test_new().palette;
+        let (_, rows_config) = agent_candidates()
+            .into_iter()
+            .find(|(name, _)| *name == "full-context")
+            .expect("full-context candidate defined above");
+        let representative = agent_cases().remove(0);
+        let missing = agent_cases().remove(2);
+
+        let representative_rows = agent_rows_from(
+            &rows_config,
+            &representative.entry,
+            representative.state_text,
+        );
+        let missing_rows = agent_rows_from(&rows_config, &missing.entry, missing.state_text);
+
+        assert_eq!(
+            representative_rows.len(),
+            2,
+            "pane+agent row survives when populated"
+        );
+        assert_eq!(
+            missing_rows.len(),
+            1,
+            "pane+agent row elides entirely when both tokens are absent, not just blanked"
+        );
+        let state_icon =
+            crate::ui::status::state_dot(missing.entry.state, missing.entry.seen, &palette);
+        let lines = render_rows(&missing_rows, state_icon, 24, &palette);
+        assert!(
+            lines
+                .iter()
+                .all(|line| !line.contains("Ν/A") && !line.contains("None")),
+            "elided tokens never render sentinel text: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn agent_long_values_truncate_with_ellipsis_at_narrow_widths() {
+        let palette = crate::app::AppState::test_new().palette;
+        let (_, rows_config) = agent_candidates()
+            .into_iter()
+            .find(|(name, _)| *name == "baseline-compact")
+            .expect("baseline-compact candidate defined above");
+        let long = agent_cases().remove(1);
+        let resolved = agent_rows_from(&rows_config, &long.entry, long.state_text);
+        let state_icon = crate::ui::status::state_dot(long.entry.state, long.entry.seen, &palette);
+
+        let lines = render_rows(&resolved, state_icon, 18, &palette);
+        assert!(
+            lines.iter().any(|line| line.contains('\u{2026}')),
+            "long workspace/tab values truncate with an ellipsis at 18 cols: {lines:?}"
+        );
+        for line in &lines {
+            assert!(crate::ui::text::display_width(line) <= 18);
+        }
+    }
+
+    struct SpaceCase {
+        name: &'static str,
+        workspace: &'static str,
+        branch: Option<&'static str>,
+        ahead_behind: Option<(usize, usize)>,
+        state_text: &'static str,
+    }
+
+    fn space_cases() -> Vec<SpaceCase> {
+        vec![
+            SpaceCase {
+                name: "representative",
+                workspace: "shepherd",
+                branch: Some("main"),
+                ahead_behind: Some((1, 0)),
+                state_text: "idle",
+            },
+            SpaceCase {
+                name: "long",
+                workspace: "backend-services-payment-orchestration-monorepo",
+                branch: Some("refactor/billing-reconciliation-pipeline-cleanup"),
+                ahead_behind: Some((12, 34)),
+                state_text: "working",
+            },
+            SpaceCase {
+                name: "missing",
+                workspace: "solo-workspace",
+                branch: None,
+                ahead_behind: None,
+                state_text: "idle",
+            },
+        ]
+    }
+
+    fn space_candidates() -> Vec<(&'static str, Vec<Vec<SpaceSidebarToken>>)> {
+        vec![
+            (
+                "baseline",
+                vec![
+                    vec![SpaceSidebarToken::StateIcon, SpaceSidebarToken::Workspace],
+                    vec![SpaceSidebarToken::Branch, SpaceSidebarToken::GitStatus],
+                ],
+            ),
+            (
+                "single-line",
+                vec![vec![
+                    SpaceSidebarToken::StateIcon,
+                    SpaceSidebarToken::Workspace,
+                    SpaceSidebarToken::Branch,
+                ]],
+            ),
+            (
+                "status-first",
+                vec![
+                    vec![SpaceSidebarToken::StateIcon, SpaceSidebarToken::StateText],
+                    vec![SpaceSidebarToken::Workspace],
+                    vec![SpaceSidebarToken::Branch, SpaceSidebarToken::GitStatus],
+                ],
+            ),
+            (
+                "branch-only",
+                vec![
+                    vec![SpaceSidebarToken::StateIcon, SpaceSidebarToken::Workspace],
+                    vec![SpaceSidebarToken::Branch],
+                ],
+            ),
+        ]
+    }
+
+    #[test]
+    fn space_candidates_render_within_declared_sidebar_widths() {
+        let palette = crate::app::AppState::test_new().palette;
+        let widths = [18usize, 24, 36];
+        let empty_tokens = std::collections::HashMap::new();
+        let state_icon = crate::ui::status::state_dot(AgentState::Idle, true, &palette);
+
+        for (candidate_name, rows_config) in space_candidates() {
+            let config = SpacesSidebarConfig {
+                rows: rows_config,
+                row_gap: 0,
+            };
+            for case in space_cases() {
+                let resolved = space_rows(
+                    &config,
+                    SpaceTokenContext {
+                        workspace: case.workspace,
+                        branch: case.branch,
+                        state_text: case.state_text,
+                        ahead_behind: case.ahead_behind,
+                        tokens: &empty_tokens,
+                        suppress_git_details: false,
+                    },
+                );
+                for width in widths {
+                    let lines = render_rows(&resolved, state_icon, width, &palette);
+                    for line in &lines {
+                        assert!(
+                            crate::ui::text::display_width(line) <= width,
+                            "{candidate_name}/{}/{width}: {line:?} exceeds declared width",
+                            case.name
+                        );
+                    }
+                    println!(
+                        "SPACE|{candidate_name}|{}|{width}|{}",
+                        case.name,
+                        lines.join(" \u{23ce} ")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn space_zero_ahead_behind_elides_git_status_but_missing_branch_elides_row() {
+        let palette = crate::app::AppState::test_new().palette;
+        let empty_tokens = std::collections::HashMap::new();
+        let config = SpacesSidebarConfig {
+            rows: vec![
+                vec![SpaceSidebarToken::StateIcon, SpaceSidebarToken::Workspace],
+                vec![SpaceSidebarToken::Branch, SpaceSidebarToken::GitStatus],
+            ],
+            row_gap: 0,
+        };
+
+        let zero_ahead_behind = space_rows(
+            &config,
+            SpaceTokenContext {
+                workspace: "repo",
+                branch: Some("main"),
+                state_text: "idle",
+                ahead_behind: Some((0, 0)),
+                tokens: &empty_tokens,
+                suppress_git_details: false,
+            },
+        );
+        assert_eq!(
+            zero_ahead_behind.len(),
+            2,
+            "branch alone keeps the second row"
+        );
+        assert_eq!(
+            zero_ahead_behind[1].len(),
+            1,
+            "zero ahead/behind elides only git_status"
+        );
+
+        let missing_branch = space_rows(
+            &config,
+            SpaceTokenContext {
+                workspace: "repo",
+                branch: None,
+                state_text: "idle",
+                ahead_behind: Some((2, 1)),
+                tokens: &empty_tokens,
+                suppress_git_details: false,
+            },
+        );
+        assert_eq!(
+            missing_branch.len(),
+            2,
+            "git_status alone still keeps the second row even without a branch"
+        );
+        assert_eq!(missing_branch[1].len(), 1);
+
+        let _ = palette;
+    }
+}
