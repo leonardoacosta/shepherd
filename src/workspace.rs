@@ -35,11 +35,18 @@ pub use self::{
         ProposalCounts, WorkspaceProjectStatus,
     },
     session_status::{
-        parse_spend_status, render_spend_status, SessionStatusRefreshDemand, SessionStatusSnapshot,
-        SpendStatus, WorkspaceSessionStatus,
+        merge_persisted_sessions, parse_context_floor_status, parse_llmtrim_status,
+        parse_persisted_session_record, render_spend_status, ContextFloorStatus, LlmTrimStatus,
+        PersistedSessionRecord, SessionStatusRefreshDemand, SessionStatusSnapshot, SessionsStatus,
+        WorkspaceSessionStatus,
     },
     tab::{NewPane, Tab},
 };
+// `SpendStatus` is nested inside `LlmTrimStatus` (and `render_spend_status`'s parameter) rather
+// than named directly by any non-test call site, so the re-export itself is only reachable by
+// name from this crate's own test code — real, not dead, but invisible to a non-test build.
+#[allow(unused_imports)]
+pub use self::session_status::SpendStatus;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WorktreeSpaceMembership {
@@ -1198,7 +1205,7 @@ impl Workspace {
     }
 
     pub fn session_status(&self) -> SessionStatusSnapshot {
-        self.cached_session_status
+        self.cached_session_status.clone()
     }
 
     /// The checkout this workspace's session status is keyed by. Shares `project_status_key`'s

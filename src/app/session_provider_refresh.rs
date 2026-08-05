@@ -15,10 +15,11 @@ use std::time::Instant;
 use super::provider::run_provider;
 use super::{App, SESSION_STATUS_REFRESH_INTERVAL};
 use crate::events::AppEvent;
-use crate::workspace::parse_spend_status;
-use crate::workspace::SessionStatusRefreshDemand;
-use crate::workspace::SessionStatusSnapshot;
-use crate::workspace::WorkspaceSessionStatus;
+use crate::workspace::{
+    merge_persisted_sessions, parse_context_floor_status, parse_llmtrim_status,
+    parse_persisted_session_record, ContextFloorStatus, LlmTrimStatus, SessionStatusRefreshDemand,
+    SessionStatusSnapshot, SessionsStatus, WorkspaceSessionStatus,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SessionStatusRefreshItem {
@@ -83,7 +84,7 @@ impl App {
             .chain(self.state.right_panel_rows.iter());
         for token in agent_rows.flatten() {
             if matches!(token.parts().0, crate::config::AgentSidebarToken::Spend) {
-                demand.spend = true;
+                demand.llmtrim = true;
             }
         }
         demand
@@ -153,31 +154,125 @@ fn refresh_session_statuses(
                 .map(|workspace_id| WorkspaceSessionStatus {
                     workspace_id,
                     checkout_key: job.checkout_key.clone(),
-                    snapshot,
+                    snapshot: snapshot.clone(),
                 }),
         );
     }
     results
 }
 
+/// One invocation per source, each gated on its own demand disjunct — a missing `llmtrim`
+/// binary elides only `llmtrim`, an unreadable session store elides only `sessions`, and so on.
 fn session_status_for_checkout(
     checkout: &Path,
     demand: SessionStatusRefreshDemand,
 ) -> SessionStatusSnapshot {
+    session_status_for_checkout_with_sessions_root(
+        checkout,
+        demand,
+        default_persisted_session_store_root(),
+    )
+}
+
+/// Split out from `session_status_for_checkout` so tests can point the `sessions` source at a
+/// fixture directory instead of the real, environment-resolved store root.
+fn session_status_for_checkout_with_sessions_root(
+    checkout: &Path,
+    demand: SessionStatusRefreshDemand,
+    sessions_root: Option<PathBuf>,
+) -> SessionStatusSnapshot {
     SessionStatusSnapshot {
-        spend: demand
-            .spend
-            .then(|| spend_status_for_checkout(checkout))
+        llmtrim: demand
+            .llmtrim
+            .then(|| llmtrim_status_for_checkout(checkout))
+            .flatten(),
+        context_floor: demand
+            .context_floor
+            .then(|| context_floor_status_for_checkout(checkout))
+            .flatten(),
+        sessions: demand
+            .sessions
+            .then(|| sessions_status_for_store(sessions_root))
             .flatten(),
     }
 }
 
-fn spend_status_for_checkout(checkout: &Path) -> Option<crate::workspace::SpendStatus> {
-    parse_spend_status(&run_provider(
-        checkout,
-        "shepherd-state",
-        &["chrome", "--once", "--json"],
-    )?)
+fn llmtrim_status_for_checkout(checkout: &Path) -> Option<LlmTrimStatus> {
+    parse_llmtrim_status(&run_provider(checkout, "llmtrim", &["status", "--json"])?)
+}
+
+fn context_floor_status_for_checkout(checkout: &Path) -> Option<ContextFloorStatus> {
+    parse_context_floor_status(&run_provider(checkout, "context-floor", &["--json"])?)
+}
+
+/// `SHEPHERD_STATE_SNAPSHOT_DIR` mirrors the companion's own override so a developer pointing
+/// the companion at a scratch snapshot store also redirects this read — the two halves share
+/// one store, so they must agree on where it lives. Falls back to the companion's own default
+/// resolution: `$XDG_STATE_HOME/shepherd-state/snapshots/v1`, else
+/// `$HOME/.local/state/shepherd-state/snapshots/v1`.
+fn default_persisted_session_store_root() -> Option<PathBuf> {
+    if let Ok(root) = std::env::var("SHEPHERD_STATE_SNAPSHOT_DIR") {
+        if !root.is_empty() {
+            return Some(PathBuf::from(root));
+        }
+    }
+    if let Ok(root) = std::env::var("XDG_STATE_HOME") {
+        if !root.is_empty() {
+            return Some(PathBuf::from(root).join("shepherd-state/snapshots/v1"));
+        }
+    }
+    dirs_home().map(|home| home.join(".local/state/shepherd-state/snapshots/v1"))
+}
+
+#[cfg(unix)]
+fn dirs_home() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+#[cfg(windows)]
+fn dirs_home() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE").map(PathBuf::from)
+}
+
+/// Walks every session file under the store root, skipping the `.locks` directory the
+/// companion's writer uses for its own flock stripes — mirrors `persistedSessionStoreProducer`.
+/// One unreadable or malformed entry is isolated rather than failing the whole source, and an
+/// absent or empty root is a valid zero-session store rather than a failure: `read_dir` on a
+/// missing directory is simply skipped by `walk_session_store`, same as the companion's
+/// `WalkDir`, which never treats a missing root as an error for this producer.
+fn sessions_status_for_store(root: Option<PathBuf>) -> Option<SessionsStatus> {
+    let root = root?;
+    let mut records = Vec::new();
+    walk_session_store(&root, &mut records);
+    Some(merge_persisted_sessions(&records))
+}
+
+fn walk_session_store(dir: &Path, records: &mut Vec<crate::workspace::PersistedSessionRecord>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            if entry.file_name() == ".locks" {
+                continue;
+            }
+            walk_session_store(&path, records);
+            continue;
+        }
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(contents) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Some(record) = parse_persisted_session_record(&contents) {
+            records.push(record);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -240,7 +335,9 @@ mod tests {
             Path::new("/nonexistent-checkout"),
             SessionStatusRefreshDemand::default(),
         );
-        assert!(snapshot.spend.is_none());
+        assert!(snapshot.llmtrim.is_none());
+        assert!(snapshot.context_floor.is_none());
+        assert!(snapshot.sessions.is_none());
     }
 
     #[test]
@@ -268,7 +365,10 @@ mod tests {
             ),
             (
                 AgentSidebarToken::Spend,
-                SessionStatusRefreshDemand { spend: true },
+                SessionStatusRefreshDemand {
+                    llmtrim: true,
+                    ..Default::default()
+                },
             ),
         ];
 
@@ -290,7 +390,10 @@ mod tests {
         sidebar.ui.sidebar.agents.rows = vec![vec![AgentSidebarToken::Spend]];
         assert_eq!(
             app_with(sidebar).session_status_demand(),
-            SessionStatusRefreshDemand { spend: true },
+            SessionStatusRefreshDemand {
+                llmtrim: true,
+                ..Default::default()
+            },
             "a token configured on the agent sidebar is a consumer"
         );
 
@@ -298,7 +401,10 @@ mod tests {
         panel.ui.right_panel.rows = vec![vec![AgentSidebarToken::Spend]];
         assert_eq!(
             app_with(panel).session_status_demand(),
-            SessionStatusRefreshDemand { spend: true },
+            SessionStatusRefreshDemand {
+                llmtrim: true,
+                ..Default::default()
+            },
             "a token configured on the right panel is a consumer"
         );
     }
@@ -356,7 +462,11 @@ mod tests {
             workspace_id: id,
             checkout_key: PathBuf::from("/repo"),
             snapshot: SessionStatusSnapshot {
-                spend: Some(crate::workspace::SpendStatus { cents: 4200 }),
+                llmtrim: Some(crate::workspace::LlmTrimStatus {
+                    spend: Some(crate::workspace::SpendStatus { cents: 4200 }),
+                    ..Default::default()
+                }),
+                ..Default::default()
             },
         }]);
 
@@ -365,7 +475,10 @@ mod tests {
         // unrelated to what this change can break.
         app.state.workspaces[0].assert_invariants_for_test();
         assert_eq!(
-            app.state.workspaces[0].session_status().spend,
+            app.state.workspaces[0]
+                .session_status()
+                .llmtrim
+                .and_then(|l| l.spend),
             Some(crate::workspace::SpendStatus { cents: 4200 }),
             "the store round-trips through adversarial identity state"
         );
@@ -384,16 +497,237 @@ mod tests {
             workspace_id: id,
             checkout_key: PathBuf::from("/repo"),
             snapshot: SessionStatusSnapshot {
-                spend: Some(crate::workspace::SpendStatus { cents: 4200 }),
+                llmtrim: Some(crate::workspace::LlmTrimStatus {
+                    spend: Some(crate::workspace::SpendStatus { cents: 4200 }),
+                    ..Default::default()
+                }),
+                ..Default::default()
             },
         }]);
 
         app.session_status_refresh_in_flight = true;
 
         assert_eq!(
-            app.state.workspaces[0].session_status().spend,
+            app.state.workspaces[0]
+                .session_status()
+                .llmtrim
+                .and_then(|l| l.spend),
             Some(crate::workspace::SpendStatus { cents: 4200 }),
             "render keeps reading the cached value while a refresh runs"
         );
+    }
+
+    /// One-off scratch directory under the OS temp root, removed on drop. Not `scratchpad/` —
+    /// that convention is for this session's own working files, not test fixtures a `cargo
+    /// nextest` worker creates and tears down per-run.
+    struct TempSessionStore {
+        root: PathBuf,
+    }
+
+    impl TempSessionStore {
+        fn new(name: &str) -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "shepherd-session-status-test-{name}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or_default()
+            ));
+            std::fs::create_dir_all(&root).expect("create scratch session store dir");
+            Self { root }
+        }
+
+        fn write(&self, relative: &str, contents: &str) {
+            let path = self.root.join(relative);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("create scratch session store subdir");
+            }
+            std::fs::write(path, contents).expect("write scratch session file");
+        }
+    }
+
+    impl Drop for TempSessionStore {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn session_record_json(session_id: &str, model: &str, observed_at: &str) -> String {
+        format!(
+            r#"{{"version":1,"harness":"codex","session_id":"{session_id}","model":"{model}","current_context_tokens":1000,"context_window_tokens":200000,"observed_at":"{observed_at}"}}"#
+        )
+    }
+
+    // --- independence (task 2.4) ---
+
+    /// `llmtrim` is not installed in the test environment, so its adapter fails via the "binary
+    /// absent" class while `sessions` succeeds by reading a fixture directory directly — proving
+    /// one failing adapter and one succeeding adapter resolve independently within one snapshot.
+    #[test]
+    fn one_failing_adapter_and_one_succeeding_adapter_resolve_independently() {
+        // See the PATH-clearing comment on `llmtrim_adapter_elides_when_the_binary_is_absent` —
+        // `llmtrim` may be genuinely installed in this dev environment.
+        std::env::remove_var("PATH");
+
+        let store = TempSessionStore::new("independence");
+        store.write(
+            "codex/session-a.json",
+            &session_record_json("session-a", "gpt-5.6-sol", "2026-08-02T19:00:00Z"),
+        );
+
+        let snapshot = session_status_for_checkout_with_sessions_root(
+            Path::new("/nonexistent-checkout"),
+            SessionStatusRefreshDemand {
+                llmtrim: true,
+                sessions: true,
+                ..Default::default()
+            },
+            Some(store.root.clone()),
+        );
+
+        assert!(
+            snapshot.llmtrim.is_none(),
+            "llmtrim has no binary in the test environment and must elide, not panic or fall back"
+        );
+        assert_eq!(
+            snapshot.sessions.and_then(|s| s.model),
+            Some("gpt-5.6-sol".to_string()),
+            "sessions must still resolve from its own fixture, unaffected by llmtrim's failure"
+        );
+    }
+
+    // --- llmtrim / context-floor: spawn failure classes ---
+
+    #[test]
+    fn llmtrim_adapter_elides_when_the_binary_is_absent() {
+        // `llmtrim` and `context-floor` are real cc-tooling binaries and may be installed on a
+        // developer's own PATH (as they are in this repo's dev environment), so "binary absent"
+        // cannot be exercised by relying on the ambient environment. `cargo nextest` runs each
+        // test in its own process, so clearing PATH here cannot affect any other test.
+        std::env::remove_var("PATH");
+        assert!(llmtrim_status_for_checkout(Path::new(".")).is_none());
+    }
+
+    #[test]
+    fn context_floor_adapter_elides_when_the_binary_is_absent() {
+        std::env::remove_var("PATH");
+        assert!(context_floor_status_for_checkout(Path::new(".")).is_none());
+    }
+
+    // --- sessions: read failure classes (task 2.5) ---
+
+    #[test]
+    fn sessions_adapter_yields_a_zero_count_snapshot_when_the_root_is_absent() {
+        let missing = Path::new("/nonexistent-shepherd-state-session-store-root");
+        let status = sessions_status_for_store(Some(missing.to_path_buf()))
+            .expect("an absent root is a valid empty store, not a failure");
+        assert_eq!(status, crate::workspace::SessionsStatus::default());
+    }
+
+    #[test]
+    fn sessions_adapter_elides_entirely_when_no_root_can_be_resolved() {
+        assert!(sessions_status_for_store(None).is_none());
+    }
+
+    #[test]
+    fn a_malformed_session_file_is_isolated_from_the_rest_of_the_store() {
+        let store = TempSessionStore::new("malformed");
+        store.write("codex/broken.json", "not json");
+        store.write(
+            "codex/valid.json",
+            &session_record_json("session-a", "gpt-5.6-sol", "2026-08-02T19:00:00Z"),
+        );
+
+        let status = sessions_status_for_store(Some(store.root.clone())).expect("root exists");
+        assert_eq!(
+            status.session_count, 1,
+            "the malformed entry is not counted"
+        );
+        assert_eq!(status.model.as_deref(), Some("gpt-5.6-sol"));
+    }
+
+    #[test]
+    fn a_partially_written_session_file_is_isolated_from_the_rest_of_the_store() {
+        // Missing session_id / observed_at: the shape a writer's crash mid-write can leave
+        // behind, distinct from `broken.json`'s not-JSON-at-all case above.
+        let store = TempSessionStore::new("partial");
+        store.write(
+            "codex/partial.json",
+            r#"{"version":1,"model":"gpt-5.6-sol"}"#,
+        );
+        store.write(
+            "codex/valid.json",
+            &session_record_json("session-a", "claude-opus-5", "2026-08-02T19:00:00Z"),
+        );
+
+        let status = sessions_status_for_store(Some(store.root.clone())).expect("root exists");
+        assert_eq!(status.session_count, 1);
+        assert_eq!(status.model.as_deref(), Some("claude-opus-5"));
+    }
+
+    #[test]
+    fn the_locks_directory_is_never_walked() {
+        let store = TempSessionStore::new("locks");
+        store.write(
+            "codex/valid.json",
+            &session_record_json("session-a", "gpt-5.6-sol", "2026-08-02T19:00:00Z"),
+        );
+        // A file directly under `.locks` that would parse as a session if it were ever visited.
+        store.write(
+            ".locks/session-a.json",
+            &session_record_json("session-b", "should-not-be-seen", "2026-08-02T20:00:00Z"),
+        );
+
+        let status = sessions_status_for_store(Some(store.root.clone())).expect("root exists");
+        assert_eq!(
+            status.session_count, 1,
+            ".locks entries must not be counted"
+        );
+        assert_eq!(status.model.as_deref(), Some("gpt-5.6-sol"));
+    }
+
+    #[test]
+    fn non_json_entries_under_the_store_are_ignored() {
+        let store = TempSessionStore::new("nonjson");
+        store.write("codex/README.md", "not a session");
+        store.write(
+            "codex/valid.json",
+            &session_record_json("session-a", "gpt-5.6-sol", "2026-08-02T19:00:00Z"),
+        );
+
+        let status = sessions_status_for_store(Some(store.root.clone())).expect("root exists");
+        assert_eq!(status.session_count, 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_session_file_is_isolated_from_the_rest_of_the_store() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let store = TempSessionStore::new("unreadable");
+        store.write(
+            "codex/valid.json",
+            &session_record_json("session-a", "gpt-5.6-sol", "2026-08-02T19:00:00Z"),
+        );
+        store.write(
+            "codex/locked.json",
+            &session_record_json("session-b", "should-not-be-seen", "2026-08-02T20:00:00Z"),
+        );
+        let locked_path = store.root.join("codex/locked.json");
+        std::fs::set_permissions(&locked_path, std::fs::Permissions::from_mode(0o000))
+            .expect("chmod scratch fixture");
+
+        let status = sessions_status_for_store(Some(store.root.clone())).expect("root exists");
+
+        // Restore permissions before the scratch directory is removed on drop.
+        std::fs::set_permissions(&locked_path, std::fs::Permissions::from_mode(0o644))
+            .expect("restore scratch fixture permissions");
+
+        assert_eq!(
+            status.session_count, 1,
+            "the unreadable entry is not counted"
+        );
+        assert_eq!(status.model.as_deref(), Some("gpt-5.6-sol"));
     }
 }

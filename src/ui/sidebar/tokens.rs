@@ -83,7 +83,8 @@ pub(in crate::ui) fn agent_rows_from(
                         // separator, and elision rules instead of gaining its own path.
                         AgentSidebarToken::Spend => entry
                             .session_status
-                            .spend
+                            .llmtrim
+                            .and_then(|llmtrim| llmtrim.spend)
                             .map(crate::workspace::render_spend_status)
                             .map(ResolvedTokenKind::Custom),
                         AgentSidebarToken::Custom(name) => entry
@@ -216,7 +217,11 @@ mod tests {
 
         let mut resolved = entry();
         resolved.session_status = crate::workspace::SessionStatusSnapshot {
-            spend: Some(crate::workspace::SpendStatus { cents: 1_021_070 }),
+            llmtrim: Some(crate::workspace::LlmTrimStatus {
+                spend: Some(crate::workspace::SpendStatus { cents: 1_021_070 }),
+                ..Default::default()
+            }),
+            ..Default::default()
         };
         assert_eq!(
             agent_rows(&config, &resolved, "working"),
