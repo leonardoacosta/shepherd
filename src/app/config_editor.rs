@@ -612,4 +612,77 @@ mod tests {
             .iter()
             .any(|diagnostic| diagnostic.contains("exited unsuccessfully")));
     }
+
+    /// The two `validate_config_editor_exit` cases above pass a synthetic status,
+    /// which proves the outcome logic but not that a real editor's exit code ever
+    /// reaches it. This drives a real child to a nonzero exit and asserts the
+    /// whole path — process exit -> `PaneRuntime::last_exit_success` ->
+    /// `finish_config_editor` -> outcome.
+    ///
+    /// Deliberately polls the runtime accessor rather than awaiting `PaneDied`:
+    /// the watcher stores the status from a `spawn_blocking` thread, but delivers
+    /// `PaneDied` via `Handle::block_on`, which a current-thread test runtime
+    /// cannot drive while the test itself is blocked. The accessor is what
+    /// `finish_config_editor` reads, so it is the contract worth pinning.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn real_editor_nonzero_exit_reaches_finish_through_the_runtime() {
+        let _guard = ConfigPathGuard::new("real-nonzero-exit");
+        let path = crate::config::config_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "onboarding = false\n").unwrap();
+        let pre_bytes = std::fs::read(&path).unwrap();
+
+        let (mut app, _pane_id) = test_app_with_pane();
+        // Write valid TOML, then fail: the "nonzero exit with valid bytes" case.
+        let script = write_editor_script(
+            &unique_temp_path("real-nonzero-editor"),
+            "printf 'onboarding = true\\n' > \"$1\"\nexit 3",
+        );
+        let _editor_guard = EditorEnvGuard::set(&script);
+
+        let opened = app.open_config_editor().unwrap();
+        assert!(!opened.already_open);
+
+        // Only the editor pane owns a real child, so any observed exit is its own.
+        let mut observed = None;
+        for _ in 0..200 {
+            observed = app
+                .terminal_runtimes
+                .values()
+                .find_map(|runtime| runtime.last_exit_success());
+            if observed.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert_eq!(
+            observed,
+            Some(false),
+            "real editor exit status should reach the runtime accessor"
+        );
+
+        let operation = app
+            .take_config_editor_completion(opened.pane_id)
+            .expect("editor operation should still be active");
+        assert_eq!(operation.pre_bytes.as_deref(), Some(pre_bytes.as_slice()));
+
+        app.finish_config_editor(operation);
+
+        let result = app
+            .state
+            .config_editor_last_result
+            .as_ref()
+            .expect("completion should record a result");
+        assert_eq!(result.outcome, ConfigEditOutcome::Reloaded);
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains("exited unsuccessfully")));
+
+        let runtimes: Vec<_> = app.terminal_runtimes.drain().collect();
+        for (_terminal_id, runtime) in runtimes {
+            runtime.shutdown();
+        }
+    }
 }
