@@ -139,22 +139,41 @@ not silently dropped.
 
 ## 7. Shrink the companion
 
+**BLOCKED — do not implement from the tasks below as written.** Per `proposal.md` `## Decisions`
+"Section 7 companion-shrink scope" (2026-08-05): checking the actual `shepherd-plugins` import
+graph instead of trusting each package's doc comment found `pkg/credentials`, `pkg/accounts`,
+`pkg/transcript`, and `pkg/severity` imported by the separate `shepherd-token-tab` tool;
+`pkg/transcript` and `pkg/pricing` imported by `internal/adapter/claude.Reader.Read`, part of the
+ingest path task 7.2 protects; and `pkg/chrome` imported by `internal/engine.go`, one of the four
+files task 7.2 explicitly says stays untouched — task 7.1 and 7.2 contradict each other for that
+package. Only `pkg/pricing` has no direct `shepherd-token-tab` import, and even it is blocked
+transitively through `pkg/transcript`. A follow-up pass must resolve `shepherd-token-tab`'s
+status and the ingest/engine entanglement before any deletion is safe; see the Decisions entry
+for the three open questions.
+
 - [ ] 7.1 In `shepherd-plugins`, remove `pkg/chrome`, `pkg/credentials`, `pkg/accounts`,
       `pkg/pricing`, `pkg/transcript`, and `pkg/severity`, plus the subcommands that existed only
-      to expose them.
+      to expose them. **Not executed — blocked, see note above.**
 - [ ] 7.2 Leave `hooks.json`, `internal/engine`, `pkg/snapshot`, and `internal/shepherd` untouched.
       The authority matrix and the snapshot merge semantics are not this change's to alter.
 - [ ] 7.3 Make each removed subcommand exit with a usage error naming Shepherd as the owner of that
-      fact, rather than vanishing silently.
-- [ ] 7.4 Run the companion's own test suite and paste the passing output.
+      fact, rather than vanishing silently. **Not executed — blocked, see note above.**
+- [ ] 7.4 Run the companion's own test suite and paste the passing output. **Not run — nothing to
+      verify until 7.1 is unblocked.**
 
 ## 8. Land the dependency amendment
 
+Independent of section 7's blocker in principle (the metadata-transport requirement amendment
+doesn't require deleting any package), but left undone alongside it this pass — landing a spec
+amendment in a repo whose own companion-shrink plan turned out to need rework is premature; the
+amendment's wording may need to change too once section 7's real scope is known.
+
 - [ ] 8.1 In `shepherd-plugins`, amend `shepherd-chrome`'s requirement "Chrome values reuse
       metadata transport" so its prohibition scopes to the feed's own projection path and does not
-      forbid a consumer resolving a value for itself. Cite this proposal.
+      forbid a consumer resolving a value for itself. Cite this proposal. **Not executed.**
 - [ ] 8.2 Confirm the amended requirement and this change agree: the feed still MUST NOT add a
-      second transport of its own, and Shepherd pulling is not the feed adding one.
+      second transport of its own, and Shepherd pulling is not the feed adding one. **Not
+      executed.**
 
 ## 9. Verify the boundary holds
 

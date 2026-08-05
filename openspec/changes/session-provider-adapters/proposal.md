@@ -176,9 +176,12 @@ projection path.
   — verified: `mergeSnapshots` and `shouldKeepOld`, `pkg/snapshot/store.go` @ shepherd-plugins
   2026-08-05
 - premise: every package proposed for absorption is a reader or a pure derivation, with no
-  ingest-time responsibility — verified: `pkg/credentials/store.go` read/write helpers,
+  ingest-time responsibility — ~~verified: `pkg/credentials/store.go` read/write helpers,
   `pkg/transcript.ReadUsage`, `pkg/pricing.Rates`/`Cost`, `pkg/severity` package doc
-  @ shepherd-plugins 2026-08-05
+  @ shepherd-plugins 2026-08-05~~ **FALSE, found during section-7 implementation (2026-08-05,
+  same day) — see `## Decisions` "Section 7 companion-shrink scope" below.** This premise was
+  checked by reading each package's own doc comment, not by checking its callers; the caller
+  graph tells a different story for four of the six.
 - premise: the config reference enumerates agent token names and is gate-checked — verified:
   `scripts/test_config_reference_check` failed on an unlisted `spend` during
   `session-provider-status` @ shepherd@89bb29e2
@@ -242,6 +245,43 @@ projection path.
   proposal that also decides who re-wires `PollUsage`/`Refresh` into a live caller now that
   section 7 removes the companion's copy, which this proposal does not attempt to answer.
   decided-by: leo
+- Section 7 companion-shrink scope — **blocked, not decided.** Task 7.1 lists six packages to
+  remove (`pkg/chrome`, `pkg/credentials`, `pkg/accounts`, `pkg/pricing`, `pkg/transcript`,
+  `pkg/severity`). Checking the actual import graph in `shepherd-plugins` (2026-08-05, during
+  section-7 implementation) instead of trusting each package's own doc comment found that five
+  of the six are load-bearing somewhere task 7.1/7.2 did not account for:
+  - `pkg/credentials`, `pkg/accounts` — imported by `shepherd-token-tab/cmd/shepherd-token-tab/
+    main.go`, a **separate live tool** in the same monorepo that this proposal never analyzes.
+    Deleting them breaks `shepherd-token-tab`'s build outright.
+  - `pkg/transcript`, `pkg/severity` — **also** imported by `shepherd-token-tab/main.go`, same
+    problem.
+  - `pkg/transcript`, `pkg/pricing` — imported by `internal/adapter/claude/claude.go`
+    (`Reader.Read`), which is the **ingest-side** `adapter.Reader` implementation that
+    populates `snapshot.SessionSnapshot`'s token/cost/context fields from a live transcript read
+    during hook ingest. This directly falsifies the Preconditions premise "every package
+    proposed for absorption is a reader or a pure derivation, with no ingest-time
+    responsibility" — `pkg/transcript`/`pkg/pricing` have ingest-time responsibility, on the
+    exact path task 7.2 says stays untouched.
+  - `pkg/chrome` — imported by `internal/engine/engine.go`'s `ProjectChromeSnapshot` (and
+    friends), which projects chrome facts into reported metadata tokens. `internal/engine` is
+    one of the four things task 7.2 explicitly protects ("untouched... not this change's to
+    alter"), so task 7.1 ("remove `pkg/chrome`") and task 7.2 ("leave `internal/engine`
+    untouched") **directly contradict each other** as written — `pkg/chrome` cannot be deleted
+    without editing the file task 7.2 forbids editing.
+
+  Only `pkg/pricing`'s claim of shepherd-token-tab-independence holds (nothing in
+  `shepherd-token-tab` imports it directly) — but it is still blocked transitively through
+  `pkg/transcript`, and through the ingest-path entanglement above.
+
+  This is not a scope correction with an obvious safe default the way the two decisions above
+  were — every candidate default (delete anyway; delete only the truly-exclusive subset; keep
+  everything) has a real, different blast radius on code this proposal did not analyze, in a
+  repository with its own release cadence and its own test suite this session did not run. Left
+  **unimplemented** rather than guessed. A follow-up pass needs to: (1) decide whether
+  `shepherd-token-tab` also migrates off these packages (a second consumer this proposal never
+  scoped) or keeps them, (2) decide whether `internal/adapter/claude` and `internal/engine`'s
+  chrome-projection code move, get deleted, or stay, and (3) only then re-derive which packages
+  (if any) are actually safe to delete. decided-by: leo
 - Pricing table ownership — chosen: Shepherd carries the model rate table and it goes stale on
   Shepherd's release cadence rather than the companion's. Rejected: leaving pricing in the
   companion, which would split one derivation across two processes for one table; decided-by: leo
