@@ -16,11 +16,12 @@ pub struct SessionStatusRefreshDemand {
     pub llmtrim: bool,
     pub context_floor: bool,
     pub sessions: bool,
+    pub local_account_signal: bool,
 }
 
 impl SessionStatusRefreshDemand {
     pub fn is_empty(&self) -> bool {
-        !self.llmtrim && !self.context_floor && !self.sessions
+        !self.llmtrim && !self.context_floor && !self.sessions && !self.local_account_signal
     }
 }
 
@@ -90,6 +91,7 @@ pub struct SessionStatusSnapshot {
     pub llmtrim: Option<LlmTrimStatus>,
     pub context_floor: Option<ContextFloorStatus>,
     pub sessions: Option<SessionsStatus>,
+    pub local_account_signal: Option<super::session_credentials::LocalAccountStatus>,
 }
 
 /// One resolved refresh result, addressed back to the workspace that asked for it.
@@ -100,7 +102,7 @@ pub struct WorkspaceSessionStatus {
     pub snapshot: SessionStatusSnapshot,
 }
 
-fn round_cents(dollars: f64) -> Option<u64> {
+pub(crate) fn round_cents(dollars: f64) -> Option<u64> {
     if !dollars.is_finite() || dollars < 0.0 {
         return None;
     }
@@ -291,7 +293,7 @@ pub fn render_spend_status(spend: SpendStatus) -> String {
 /// ordering is needed here (which observation is newest), so this is deliberately not a general
 /// calendar library — no existing dependency covers RFC 3339 parsing, and pulling one in for a
 /// single comparison would be a heavier addition than a self-contained ~40-line parser.
-fn parse_rfc3339_nanos(value: &str) -> Option<i128> {
+pub(crate) fn parse_rfc3339_nanos(value: &str) -> Option<i128> {
     let year: i64 = value.get(0..4)?.parse().ok()?;
     if value.as_bytes().get(4)? != &b'-' {
         return None;

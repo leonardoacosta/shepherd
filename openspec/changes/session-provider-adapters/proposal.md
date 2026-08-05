@@ -116,7 +116,13 @@ counts, quotas, and times.
 
 ### Files
 
-- `src/workspace/session_status.rs` — one parser and one domain field per source.
+- `src/workspace/session_status.rs` — one parser and one domain field per source. In practice
+  split across sibling files (`session_status.rs`, `session_credentials.rs`,
+  `session_pricing.rs`, `session_severity.rs`, `session_transcript.rs`) once the true size of
+  seven sources' worth of parsers, domain types, and derivations became clear during
+  implementation — one file housing all of it would violate this repo's "no god objects"
+  principle. `session_status.rs` stays the shared home for `SessionStatusSnapshot`/
+  `SessionStatusRefreshDemand` themselves and the RFC3339/cents helpers the siblings reuse.
 - `src/app/session_provider_refresh.rs` — one adapter invocation per source; demand gains one
   disjunct per token.
 - `src/config/sidebar.rs`, `src/ui/sidebar/tokens.rs` — the new token names and their resolution.
@@ -208,19 +214,34 @@ projection path.
 - Credential reading — chosen: accepted. Shepherd gains the ability to read credential material it
   does not touch today. Surfaced before the decision rather than discovered during it;
   decided-by: leo
-- `local-account-signal` polling and refresh — chosen: **Shepherd fully absorbs
-  `Mutator.PollUsage` and `Mutator.Refresh`.** `quota_remaining`/`reset_at` are not a file read:
-  the companion's `pkg/credentials` computes them by decrypting the active credential's OAuth
-  blob (AES-256-GCM under `NEXUS_ENCRYPTION_KEY`) and making a live authenticated HTTP call to
-  the provider's usage endpoint, refreshing the access token first when it is expired. Shepherd
-  takes over both — decrypt, poll, and (on an expired token) call the provider's OAuth token
-  endpoint and persist the refreshed value back to `credentials.jsonl`, re-encrypted. This
-  **supersedes task 3.1's "read-only: no write path moves"** for this one source only; every
-  other section-3/4/5 reader (accounts, transcript, pricing, severity) stays read-only as
-  written. Rejected: read-only poll that elides on an expired token, which would make
-  `local-account-signal` go silently stale the moment nothing else in the system still refreshes
-  tokens (section 7 removes the companion's own refresh path along with the rest of
-  `pkg/credentials`). decided-by: leo
+- `local-account-signal` polling and refresh — **superseded, same day.** The entry below records
+  what actually happened; the struck-through reasoning above it is kept rather than deleted
+  because the correction is itself load-bearing (a later reader hitting the same wrong premise
+  should find out why it's wrong, not silently see a different answer).
+
+  ~~Chosen: Shepherd fully absorbs `Mutator.PollUsage` and `Mutator.Refresh` — decrypt, poll the
+  provider's usage endpoint, refresh an expired token, and persist the refreshed value back to
+  `credentials.jsonl`, re-encrypted. Reasoning at decision time: `quota_remaining`/`reset_at`
+  looked like they required decrypting the active credential's OAuth blob and calling the
+  provider live.~~ **That reasoning was wrong.** Reading `cmd/shepherd-state/main.go`'s
+  `defaultReadAccountSignals` (the function that actually backs `local-account-signal` in the
+  live system) shows it does neither: it reads `credentials.jsonl` (plaintext columns only —
+  `ID`, `CooldownUntil` — never touching `ValueEncrypted`) and `usage.json` (also plaintext),
+  and computes `remaining = usage_5h_limit - usage_5h_used` from whatever is already cached
+  there. No decrypt, no HTTP call, in the adapter's own path. `Mutator.PollUsage` and
+  `Mutator.Refresh` exist in `pkg/credentials` but are called from nowhere else in either
+  `shepherd-plugins` repo (`shepherd-state` or `shepherd-token-tab`) — unwired maintenance code
+  the package doc marks "(in later tasks)", not something `local-account-signal` depends on
+  today.
+
+  **Corrected decision — chosen: read-only, matching task 3.1's original wording.** Shepherd
+  ports `defaultReadAccountSignals`'s exact logic: read `credentials.jsonl`'s plaintext columns
+  and `usage.json`, compute `remaining`/`cooldown_until`, done. No decryption, no HTTP client, no
+  write path, for this source. `NEXUS_ENCRYPTION_KEY` and the OAuth refresh/poll HTTP flow are
+  out of scope for `session-provider-adapters` entirely — they would only matter to a future
+  proposal that also decides who re-wires `PollUsage`/`Refresh` into a live caller now that
+  section 7 removes the companion's copy, which this proposal does not attempt to answer.
+  decided-by: leo
 - Pricing table ownership — chosen: Shepherd carries the model rate table and it goes stale on
   Shepherd's release cadence rather than the companion's. Rejected: leaving pricing in the
   companion, which would split one derivation across two processes for one table; decided-by: leo

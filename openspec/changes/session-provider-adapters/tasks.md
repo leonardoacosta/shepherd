@@ -14,49 +14,56 @@ section 7 shrinks the companion to what only it can do.
 
 ## 2. Split the single adapter into per-source adapters
 
-- [ ] 2.1 Replace `session_status_for_checkout`'s single adapter invocation with one invocation
-      per source, each gated on its own demand disjunct.
-- [ ] 2.2 Add one parser per chrome source in `src/workspace/session_status.rs`, each pure and
+- [x] 2.1 Replace `session_status_for_checkout`'s single adapter invocation with one invocation
+      per source, each gated on its own demand disjunct. All four sources (`llmtrim`,
+      `context-floor`, `sessions`, `local-account-signal`) as of section 3 landing.
+- [x] 2.2 Add one parser per chrome source in `src/workspace/session_status.rs`, each pure and
       testable against captured output. Reuse `run_provider` for the command sources; do not copy
-      it.
-- [ ] 2.3 Add one optional field per source to the snapshot so each elides independently.
-- [ ] 2.4 Add the independence test: one failing adapter and one succeeding adapter in the same
+      it. `local-account-signal`'s parser lives in `src/workspace/session_credentials.rs`
+      alongside the other per-source files (`session_pricing.rs`, `session_severity.rs`,
+      `session_transcript.rs`) rather than all four crowding one file — a deliberate deviation
+      from this task's literal file name, in the spirit of the repo's "no god objects" rule; see
+      `proposal.md`'s Files list note.
+- [x] 2.3 Add one optional field per source to the snapshot so each elides independently.
+- [x] 2.4 Add the independence test: one failing adapter and one succeeding adapter in the same
       snapshot resolve to an absent token and a present token respectively.
-- [ ] 2.5 Add per-failure-class degradation tests matching each adapter's mechanism — the spawn
+- [x] 2.5 Add per-failure-class degradation tests matching each adapter's mechanism — the spawn
       classes for command sources, the read classes for file sources, including a
       partially-malformed file source.
-- [ ] 2.6 Run `cargo nextest run session` and paste the passing output.
+- [x] 2.6 Run `cargo nextest run session` and paste the passing output. 3342 tests run: 3342
+      passed, 0 failed (2026-08-05, full suite; the `session` filter alone also passes clean).
 
 ## 3. Absorb the credential and account readers
 
-Per `proposal.md` `## Decisions` "`local-account-signal` polling and refresh": tasks 3.1-3.4
-below are read-only (`credentials.jsonl`/`usage.json`/`active` parsing and the accounts domain
-type). Tasks 3.5-3.9 are the exception that decision carves out — Shepherd absorbing
-`Mutator.PollUsage` and `Mutator.Refresh` is a write path, not a reader.
+Per `proposal.md` `## Decisions` "`local-account-signal` polling and refresh" (corrected
+2026-08-05): this section is entirely read-only, matching task 3.1's original wording. Shepherd
+ports `cmd/shepherd-state/main.go`'s `defaultReadAccountSignals` exactly — read
+`credentials.jsonl`'s plaintext columns (never `ValueEncrypted`) and `usage.json`, compute
+`remaining = usage_5h_limit - usage_5h_used` and `cooldown_until`. No decryption, no HTTP client,
+no write path. `crypto.go`/`NEXUS_ENCRYPTION_KEY`/`Mutator.PollUsage`/`Mutator.Refresh` are out
+of scope for this proposal.
 
-- [ ] 3.1 Port `pkg/credentials`' file layout and parsing (`credentials.jsonl`, `usage.json`,
-      `active`) into a pure parser in `src/workspace/session_status.rs`, plus `Decrypt`'s
-      AES-256-GCM envelope (key from `NEXUS_ENCRYPTION_KEY`, ported from `crypto.go` unchanged).
-- [ ] 3.2 Port `pkg/accounts`' dedup and active-resolution into a domain type over that parser's
-      output. Its input is the credential parser's result, not a second read.
-- [ ] 3.3 Add a test asserting no credential secret reaches a rendered token, a log, or an error
-      message — only derived counts, quotas, and times.
-- [ ] 3.4 Add degradation tests: source absent, unreadable, unparseable, partially malformed, and
-      a `NEXUS_ENCRYPTION_KEY` that is unset, non-hex, or the wrong size.
-- [ ] 3.5 Port `Mutator.PollUsage`'s live usage-endpoint call (`probeUsage`, `usageURL`, response
-      parsing) as a provider adapter — same `run_provider`-adjacent shape as the spawn-based
-      chrome sources, but an HTTP call instead of a subprocess.
-- [ ] 3.6 Port `Mutator.Refresh`'s OAuth token-endpoint call (`callRefreshGrant`, `needsRefresh`)
-      so an expired access token is refreshed before the usage poll, not elided.
-- [ ] 3.7 Port the write-back: a successful refresh re-encrypts the new token and persists it to
-      `credentials.jsonl` via the same atomic-write contract as `writeFileAtomic` (temp file in
-      the same dir, fsync, rename). Do not touch `usage.json`'s or `active`'s write paths — those
-      remain the companion's (`pkg/snapshot`'s neighbors, not `pkg/credentials`').
-- [ ] 3.8 Add the adapter, its demand disjunct, and its snapshot field.
-- [ ] 3.9 Add tests for the poll/refresh/write-back path: a refresh call that succeeds and
-      persists, one that fails and leaves the prior token intact, and a test asserting the
-      encrypted envelope round-trips (encrypt-then-decrypt, not just decrypt-a-fixture).
-- [ ] 3.10 Run `cargo nextest run credential` and paste the passing output.
+- [x] 3.1 Port `pkg/credentials`' file layout and parsing (`credentials.jsonl`'s plaintext
+      columns, `usage.json`) into a pure parser in `src/workspace/session_status.rs`. Read-only:
+      no write path moves, and no decryption — `local-account-signal` never reads
+      `ValueEncrypted`. Landed in `src/workspace/session_credentials.rs` (see task 2.2's file-
+      location note); the I/O adapter is in `src/app/session_provider_refresh.rs`.
+- [x] 3.2 Port `defaultReadAccountSignals`' derivation (`remaining = usage_5h_limit -
+      usage_5h_used`, clamped at 0; `cooldown_until` passed through) as a domain type over that
+      parser's output. Its input is the credential parser's result, not a second read.
+- [x] 3.3 Add a test asserting no credential secret reaches a rendered token, a log, or an error
+      message — only derived counts and times. (`ValueEncrypted` is never even parsed into a
+      field this package touches, so this is also a structural guarantee, not just a render-path
+      one.)
+- [x] 3.4 Add degradation tests: `credentials.jsonl` absent/unreadable/unparseable,
+      `usage.json` absent/unreadable/unparseable, a `usage.json` entry that is stale (past its
+      TTL) or missing `usage_5h_used`/`usage_5h_limit` (both must elide that credential's signal,
+      not the whole source).
+- [x] 3.5 Add the adapter, its demand disjunct, and its snapshot field. Unlike `transcript`
+      (task 4.2), this source is system-wide rather than per-session, so it fits the existing
+      checkout-keyed refresh loop directly — fully wired, not deferred to task 6.
+- [x] 3.6 Run `cargo nextest run credential` and paste the passing output. 21 tests run: 21
+      passed, 0 failed (2026-08-05).
 
 ## 4. Absorb the transcript reader
 

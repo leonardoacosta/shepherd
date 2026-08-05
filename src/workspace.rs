@@ -17,6 +17,7 @@ use crate::terminal::{TerminalId, TerminalRuntime, TerminalRuntimeRegistry, Term
 mod aggregate;
 mod git;
 mod project_status;
+mod session_credentials;
 mod session_pricing;
 mod session_severity;
 mod session_status;
@@ -28,6 +29,9 @@ use self::git::git_ahead_behind;
 use self::git::git_status_cache_key_for_space;
 pub(crate) use self::{
     git::git_status_snapshot_for_cwd_with_demand,
+    session_credentials::{
+        derive_local_account_status, parse_credentials_jsonl, parse_usage_json, LocalAccountStatus,
+    },
     session_transcript::{munge_claude_path, parse_transcript_usage, TranscriptUsage},
     tab::MovedPane,
 };

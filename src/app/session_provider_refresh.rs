@@ -16,10 +16,11 @@ use super::provider::run_provider;
 use super::{App, SESSION_STATUS_REFRESH_INTERVAL};
 use crate::events::AppEvent;
 use crate::workspace::{
-    merge_persisted_sessions, munge_claude_path, parse_context_floor_status, parse_llmtrim_status,
-    parse_persisted_session_record, parse_transcript_usage, ContextFloorStatus, LlmTrimStatus,
-    SessionStatusRefreshDemand, SessionStatusSnapshot, SessionsStatus, TranscriptUsage,
-    WorkspaceSessionStatus,
+    derive_local_account_status, merge_persisted_sessions, munge_claude_path,
+    parse_context_floor_status, parse_credentials_jsonl, parse_llmtrim_status,
+    parse_persisted_session_record, parse_transcript_usage, parse_usage_json, ContextFloorStatus,
+    LlmTrimStatus, LocalAccountStatus, SessionStatusRefreshDemand, SessionStatusSnapshot,
+    SessionsStatus, TranscriptUsage, WorkspaceSessionStatus,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -182,6 +183,23 @@ fn session_status_for_checkout_with_sessions_root(
     demand: SessionStatusRefreshDemand,
     sessions_root: Option<PathBuf>,
 ) -> SessionStatusSnapshot {
+    session_status_for_checkout_with_roots(
+        checkout,
+        demand,
+        sessions_root,
+        default_credentials_state_dir(),
+    )
+}
+
+/// Split out from `session_status_for_checkout_with_sessions_root` so tests can point
+/// `local-account-signal` at a fixture directory too, the same way `sessions_root` already lets
+/// tests fixture the sessions source.
+fn session_status_for_checkout_with_roots(
+    checkout: &Path,
+    demand: SessionStatusRefreshDemand,
+    sessions_root: Option<PathBuf>,
+    credentials_dir: Option<PathBuf>,
+) -> SessionStatusSnapshot {
     SessionStatusSnapshot {
         llmtrim: demand
             .llmtrim
@@ -194,6 +212,10 @@ fn session_status_for_checkout_with_sessions_root(
         sessions: demand
             .sessions
             .then(|| sessions_status_for_store(sessions_root))
+            .flatten(),
+        local_account_signal: demand
+            .local_account_signal
+            .then(|| local_account_status_for_dir(credentials_dir))
             .flatten(),
     }
 }
@@ -274,6 +296,46 @@ fn walk_session_store(dir: &Path, records: &mut Vec<crate::workspace::PersistedS
             records.push(record);
         }
     }
+}
+
+/// `SHEPHERD_CREDENTIALS_DIR` mirrors the companion's own override (`ResolveStateDir`); falls
+/// back to `~/.config/shepherd/credentials`, matching the companion's default exactly (it sits
+/// under `~/.config/shepherd` rather than `~/.config/nexus` — this state is shepherd-state's
+/// own, not the retiring service's).
+fn default_credentials_state_dir() -> Option<PathBuf> {
+    if let Ok(dir) = std::env::var("SHEPHERD_CREDENTIALS_DIR") {
+        if !dir.is_empty() {
+            return Some(PathBuf::from(dir));
+        }
+    }
+    dirs_home().map(|home| home.join(".config/shepherd/credentials"))
+}
+
+/// `local-account-signal`'s adapter: reads `credentials.jsonl` and `usage.json` from the
+/// credential state dir and derives the aggregate quota/cooldown facts. A missing
+/// `credentials.jsonl` is the pre-import state (no accounts yet) rather than a failure — mirrors
+/// `ReadCredentials`'s own `os.IsNotExist` -> empty-slice handling. A missing `usage.json` is
+/// likewise the never-polled state, not a failure, mirroring `ReadUsage`. Any OTHER read or
+/// parse failure elides the whole source: unlike the persisted-session store, credentials.jsonl
+/// parsing is all-or-nothing (mirrors `ReadCredentials`'s error propagation on a single bad
+/// line).
+fn local_account_status_for_dir(dir: Option<PathBuf>) -> Option<LocalAccountStatus> {
+    let dir = dir?;
+    let credentials = match std::fs::read_to_string(dir.join("credentials.jsonl")) {
+        Ok(contents) => parse_credentials_jsonl(&contents)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(_) => return None,
+    };
+    let usage = match std::fs::read_to_string(dir.join("usage.json")) {
+        Ok(contents) => parse_usage_json(&contents)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+        Err(_) => return None,
+    };
+    let now_nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i128)
+        .unwrap_or(0);
+    Some(derive_local_account_status(&credentials, &usage, now_nanos))
 }
 
 /// `~/.claude/projects` — the Claude Code transcript root. A function (not a constant) so a
@@ -778,5 +840,100 @@ mod tests {
             "the unreadable entry is not counted"
         );
         assert_eq!(status.model.as_deref(), Some("gpt-5.6-sol"));
+    }
+
+    // --- local-account-signal: degradation classes (task 3.4) ---
+
+    #[test]
+    fn local_account_signal_elides_entirely_when_no_dir_can_be_resolved() {
+        assert!(local_account_status_for_dir(None).is_none());
+    }
+
+    #[test]
+    fn local_account_signal_is_an_empty_status_when_credentials_jsonl_is_absent() {
+        let store = TempSessionStore::new("credentials-absent");
+        let status = local_account_status_for_dir(Some(store.root.clone()))
+            .expect("a missing credentials.jsonl is the pre-import state, not a failure");
+        assert_eq!(status, crate::workspace::LocalAccountStatus::default());
+    }
+
+    #[test]
+    fn local_account_signal_treats_a_missing_usage_json_as_never_polled() {
+        let store = TempSessionStore::new("usage-absent");
+        store.write("credentials.jsonl", "{\"id\":\"cred-a\"}");
+        let status = local_account_status_for_dir(Some(store.root.clone()))
+            .expect("a missing usage.json is the never-polled state, not a failure");
+        assert_eq!(
+            status,
+            crate::workspace::LocalAccountStatus::default(),
+            "no usage entry for cred-a means no quota to report, not an error"
+        );
+    }
+
+    #[test]
+    fn local_account_signal_elides_when_credentials_jsonl_is_malformed() {
+        let store = TempSessionStore::new("credentials-malformed");
+        store.write("credentials.jsonl", "not json");
+        assert!(local_account_status_for_dir(Some(store.root.clone())).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_account_signal_elides_when_credentials_jsonl_is_unreadable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let store = TempSessionStore::new("credentials-unreadable");
+        store.write("credentials.jsonl", "{\"id\":\"cred-a\"}");
+        let path = store.root.join("credentials.jsonl");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000))
+            .expect("chmod scratch fixture");
+
+        let result = local_account_status_for_dir(Some(store.root.clone()));
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("restore scratch fixture permissions");
+
+        assert!(
+            result.is_none(),
+            "a permission-denied credentials.jsonl must elide the source, not panic"
+        );
+    }
+
+    #[test]
+    fn local_account_signal_elides_when_usage_json_is_malformed() {
+        let store = TempSessionStore::new("usage-malformed");
+        store.write("credentials.jsonl", "{\"id\":\"cred-a\"}");
+        store.write("usage.json", "not json");
+        assert!(local_account_status_for_dir(Some(store.root.clone())).is_none());
+    }
+
+    #[test]
+    fn local_account_signal_resolves_from_the_credentials_and_usage_files() {
+        let store = TempSessionStore::new("credentials-happy-path");
+        store.write(
+            "credentials.jsonl",
+            "{\"id\":\"cred-a\",\"value_encrypted\":\"SECRET\"}",
+        );
+        store.write(
+            "usage.json",
+            &format!(
+                r#"{{"cred-a":{{"usage_5h_used":10,"usage_5h_limit":100,"polled_at":"{}","ttl_seconds":3600}}}}"#,
+                chrono_now_rfc3339_for_test()
+            ),
+        );
+        let status = local_account_status_for_dir(Some(store.root.clone())).expect("resolves");
+        assert_eq!(status.quota_remaining, Some(90));
+    }
+
+    /// A minimal RFC3339 "now" stamp for a freshness window generous enough (1 hour TTL) not to
+    /// flake on slow CI — this crate deliberately carries no date/time dependency (see
+    /// `session_status.rs`'s `parse_rfc3339_nanos` doc comment), so tests format one by hand
+    /// rather than reach for one.
+    fn chrono_now_rfc3339_for_test() -> String {
+        // A fixed, always-fresh-enough instant far in the future relative to any real clock at
+        // test-run time is simpler and just as valid as computing the real wall clock: the test
+        // only needs `usage_is_fresh` to see `polled_at` at or before `now`, and freshness ends
+        // at polled_at + 3600s regardless of which "now" produced it.
+        "2099-01-01T00:00:00Z".to_string()
     }
 }
